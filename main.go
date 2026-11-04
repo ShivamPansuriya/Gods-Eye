@@ -9,6 +9,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -18,6 +20,7 @@ import (
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go/v2"
+	"github.com/anthropics/anthropic-sdk-go/v2/option"
 
 	"github.com/ShivamPansuriya/gods-eye/internal/diff"
 	"github.com/ShivamPansuriya/gods-eye/internal/render"
@@ -45,11 +48,12 @@ func main() {
 		local    = flag.Bool("local", false, "review the local branch with git instead of a GitHub PR")
 		base     = flag.String("base", "", "base ref for --local (default: origin/HEAD or main)")
 		diffFile = flag.String("diff", "", "review this unified diff `file`")
-		title    = flag.String("title", "", "PR title to use with --diff")
+		title    = flag.String("title", "", "PR title for --diff / --local (default: from commits)")
 		model    = flag.String("model", "claude-opus-5-5", "Claude model")
 		effort   = flag.String("effort", "high", "reasoning effort: low | medium | high | xhigh | max")
 		out      = flag.String("out", "", "write the HTML page here (default: .godseye/<pr>.html)")
 		noOpen   = flag.Bool("no-open", false, "don't open the page in a browser")
+		serve    = flag.String("serve", "", "serve the page over HTTP on this `addr` (e.g. :8080) instead of opening a file")
 		comment  = flag.Bool("comment", false, "post a short summary comment on the PR")
 		md       = flag.Bool("md", false, "print the Markdown summary to stdout")
 		save     = flag.String("save", "", "also save the raw review JSON to `file`")
@@ -96,7 +100,7 @@ func main() {
 		} else {
 			step("Reviewing %d files, %d hunks with %s (effort %s)…", len(d.Files), len(d.Hunks()), *model, *effort)
 			t0 := time.Now()
-			r, u, err = review.Run(ctx, anthropic.NewClient(), in, d, review.Options{Model: *model, Effort: *effort})
+			r, u, err = review.Run(ctx, newClient(), in, d, review.Options{Model: *model, Effort: *effort})
 			check(err)
 			step("Done in %s · %d units · %d in / %d out tokens%s", time.Since(t0).Round(time.Second), len(r.Units), u.InputTokens, u.OutputTokens, costStr(u))
 		}
@@ -146,6 +150,10 @@ func main() {
 		check(cmd.Run())
 		step("Posted summary comment on #%d", rep.Meta.Number)
 	}
+	if *serve != "" {
+		check(serveFile(*serve, abs))
+		return
+	}
 	if !*noOpen {
 		openBrowser(abs)
 	}
@@ -156,7 +164,11 @@ func load(local bool, base, diffFile, title, repo, pr string) (*source.Input, er
 	case diffFile != "":
 		return source.FromDiffFile(diffFile, title, "")
 	case local:
-		return source.FromLocal(base)
+		in, err := source.FromLocal(base)
+		if err == nil && title != "" {
+			in.Title = title
+		}
+		return in, err
 	default:
 		if _, err := exec.LookPath("gh"); err != nil {
 			return nil, errors.New("gh CLI not found; install it from https://cli.github.com or use --local")
@@ -203,4 +215,29 @@ func fail(format string, a ...any) {
 	}
 	fmt.Fprintln(os.Stderr, "✕ "+msg)
 	os.Exit(1)
+}
+
+// newClient uses ANTHROPIC_API_KEY (the SDK default) and falls back to CLAUDE_API_KEY.
+func newClient() anthropic.Client {
+	if os.Getenv("ANTHROPIC_API_KEY") == "" && os.Getenv("ANTHROPIC_AUTH_TOKEN") == "" {
+		if k := os.Getenv("CLAUDE_API_KEY"); k != "" {
+			return anthropic.NewClient(option.WithAPIKey(k))
+		}
+	}
+	return anthropic.NewClient()
+}
+
+// serveFile serves the review page at / until interrupted.
+func serveFile(addr, file string) error {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		http.ServeFile(w, r, file)
+	})
+	step("Serving review at http://localhost:%d (Ctrl-C to stop)", ln.Addr().(*net.TCPAddr).Port)
+	return http.Serve(ln, mux)
 }
