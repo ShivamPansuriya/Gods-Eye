@@ -2,17 +2,67 @@ package review
 
 import "encoding/json"
 
-// Schema is the JSON schema sent as output_config.format, so the API returns
-// exactly this shape. Kept hand-written so it matches types.go precisely and
-// stays within what structured outputs supports (objects with
-// additionalProperties:false, all keys required, enums).
-func Schema() json.RawMessage { return json.RawMessage(schemaJSON) }
+// MapSchema is the input schema of submit_review.
+func MapSchema() map[string]any { return mustMap(mapSchemaJSON) }
 
-const schemaJSON = `{
+// FindingsSchema is the input schema of submit_findings.
+func FindingsSchema() map[string]any { return mustMap(findingsSchemaJSON) }
+
+// VerdictSchema is the input schema of submit_verdict.
+func VerdictSchema() map[string]any { return mustMap(verdictSchemaJSON) }
+
+// Schema is kept for tests: the map schema as raw JSON.
+func Schema() json.RawMessage { return json.RawMessage(mapSchemaJSON) }
+
+func mustMap(s string) map[string]any {
+	var m map[string]any
+	if err := json.Unmarshal([]byte(s), &m); err != nil {
+		panic(err)
+	}
+	// Tool schemas need Go []string for "required" at the top level.
+	if req, ok := m["required"].([]any); ok {
+		out := make([]string, len(req))
+		for i, r := range req {
+			out[i] = r.(string)
+		}
+		m["required"] = out
+	}
+	return m
+}
+
+const mapSchemaJSON = `{
   "type": "object",
   "additionalProperties": false,
-  "required": ["title","eli5","verdict","units","not_checked","watch_after_deploy"],
+  "required": ["story","title","eli5","verdict","units","not_checked","watch_after_deploy"],
   "properties": {
+    "story": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["why","why_basis","what","before","after","impact","focus","review_mins"],
+      "properties": {
+        "why":       {"type": "string"},
+        "why_basis": {"type": "string", "enum": ["stated","inferred"]},
+        "what":      {"type": "string"},
+        "before":    {"type": "string"},
+        "after":     {"type": "string"},
+        "focus":     {"type": "array", "items": {"type": "string"}},
+        "review_mins": {"type": "integer"},
+        "impact": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["who","area","change","kind"],
+            "properties": {
+              "who":    {"type": "string", "enum": ["users","admins","developers","operators","data"]},
+              "area":   {"type": "string"},
+              "change": {"type": "string"},
+              "kind":   {"type": "string", "enum": ["added","changed","removed","risk"]}
+            }
+          }
+        }
+      }
+    },
     "title":   {"type": "string"},
     "eli5":    {"type": "string"},
     "verdict": {"type": "string", "enum": ["approve","request_changes","needs_decision"]},
@@ -23,7 +73,7 @@ const schemaJSON = `{
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id","title","hunks","tier","risk","risk_reason","brief","flow","notes","checks","blast","ask"],
+        "required": ["id","title","hunks","tier","risk","risk_reason","brief","question","flow","notes","checks","blast","ask"],
         "properties": {
           "id":          {"type": "string"},
           "title":       {"type": "string"},
@@ -32,6 +82,7 @@ const schemaJSON = `{
           "risk":        {"type": "string", "enum": ["low","medium","high"]},
           "risk_reason": {"type": "string"},
           "brief":       {"type": "string"},
+          "question":    {"type": "string"},
           "flow": {
             "type": "object",
             "additionalProperties": false,
@@ -89,7 +140,7 @@ const schemaJSON = `{
               "properties": {
                 "title":  {"type": "string"},
                 "detail": {"type": "string"},
-                "basis":  {"type": "string", "enum": ["seen_in_diff","inferred"]}
+                "basis":  {"type": "string", "enum": ["seen_in_diff","seen_in_repo","inferred"]}
               }
             }
           },
@@ -111,5 +162,55 @@ const schemaJSON = `{
         "line":  {"type": "integer"}
       }
     }
+  }
+}`
+
+const findingsSchemaJSON = `{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["findings"],
+  "properties": {
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["title","file","line","quote","severity","category","scenario","fix","bug_class","also_at","confidence"],
+        "properties": {
+          "title":     {"type": "string"},
+          "file":      {"type": "string"},
+          "line":      {"type": "integer"},
+          "quote":     {"type": "string"},
+          "severity":  {"type": "string", "enum": ["important","minor","nit"]},
+          "category":  {"type": "string", "enum": ["logic","data","concurrency","security","contract","error_handling","resource","performance","other"]},
+          "scenario":  {"type": "string"},
+          "fix":       {"type": "string"},
+          "bug_class": {"type": "string"},
+          "confidence":{"type": "string", "enum": ["low","medium","high"]},
+          "also_at": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["file","line"],
+              "properties": {"file": {"type": "string"}, "line": {"type": "integer"}}
+            }
+          }
+        }
+      }
+    }
+  }
+}`
+
+const verdictSchemaJSON = `{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["real","introduced","severity","confidence","reason"],
+  "properties": {
+    "real":       {"type": "boolean"},
+    "introduced": {"type": "boolean"},
+    "severity":   {"type": "string", "enum": ["important","minor","nit"]},
+    "confidence": {"type": "string", "enum": ["low","medium","high"]},
+    "reason":     {"type": "string"}
   }
 }`

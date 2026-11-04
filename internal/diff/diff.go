@@ -217,3 +217,27 @@ func atoiDefault(s string, def int) int {
 	}
 	return atoi(s)
 }
+
+// AnnotatedFiles is Annotated limited to the given paths.
+func (d *Diff) AnnotatedFiles(paths map[string]bool) string {
+	sub := &Diff{}
+	for _, f := range d.Files {
+		if paths[f.Path] {
+			sub.Files = append(sub.Files, f)
+		}
+	}
+	return sub.Annotated()
+}
+
+// Summary lists every changed file with its size, one per line.
+func (d *Diff) Summary() string {
+	var b strings.Builder
+	for _, f := range d.Files {
+		ids := make([]string, len(f.Hunks))
+		for i, h := range f.Hunks {
+			ids[i] = h.ID
+		}
+		fmt.Fprintf(&b, "%s (%s, +%d -%d; %s)\n", f.Path, f.Status, f.Adds, f.Dels, strings.Join(ids, " "))
+	}
+	return b.String()
+}

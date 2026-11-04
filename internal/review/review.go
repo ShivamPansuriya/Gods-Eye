@@ -1,122 +1,14 @@
-// Package review asks Claude for a structured review and cleans the result.
+// Package review runs the review pipeline and cleans its result.
 package review
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
-
-	"github.com/anthropics/anthropic-sdk-go/v2"
-	"github.com/anthropics/anthropic-sdk-go/v2/shared/constant"
 
 	"github.com/ShivamPansuriya/gods-eye/internal/diff"
 	"github.com/ShivamPansuriya/gods-eye/internal/risk"
-	"github.com/ShivamPansuriya/gods-eye/internal/source"
 )
-
-// Options controls the model call.
-type Options struct {
-	Model  string // default claude-opus-5-5
-	Effort string // low | medium | high | xhigh | max
-}
-
-// Usage is what the call cost.
-type Usage struct {
-	Model        string  `json:"model"`
-	InputTokens  int64   `json:"inputTokens"`
-	OutputTokens int64   `json:"outputTokens"`
-	CacheRead    int64   `json:"cacheRead"`
-	CostUSD      float64 `json:"costUsd"`
-}
-
-// pricing per 1M tokens (input, output). Unknown models report cost 0.
-var pricing = map[string][2]float64{
-	"claude-opus-5-5":   {4, 20},
-	"claude-sonnet-5-5": {2, 10},
-	"claude-haiku-5-5":  {0.10, 0.50},
-	"claude-fable-5-1":  {10, 50},
-}
-
-// MaxDiffChars guards against sending something huge by accident (~250k tokens).
-const MaxDiffChars = 1_000_000
-
-// Prompt returns the user prompt (for --dry-run).
-func Prompt(in *source.Input, d *diff.Diff) string { return userPrompt(in, d.Annotated()) }
-
-// Run calls Claude and returns a cleaned review.
-func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff.Diff, opt Options) (*Review, *Usage, error) {
-	if opt.Model == "" {
-		opt.Model = "claude-opus-5-5"
-	}
-	if opt.Effort == "" {
-		opt.Effort = "high"
-	}
-	annotated := d.Annotated()
-	if len(annotated) > MaxDiffChars {
-		return nil, nil, fmt.Errorf("diff is %d chars (limit %d); split the PR or review a narrower range", len(annotated), MaxDiffChars)
-	}
-
-	params := anthropic.BetaMessageNewParams{
-		Model:     opt.Model,
-		MaxTokens: 64000,
-		System: []anthropic.BetaTextBlockParam{{
-			Text:         systemPrompt,
-			CacheControl: anthropic.NewBetaCacheControlEphemeralParam(),
-		}},
-		Messages: []anthropic.BetaMessageParam{
-			anthropic.NewBetaUserMessage(anthropic.NewBetaTextBlock(userPrompt(in, annotated))),
-		},
-		OutputConfig: anthropic.BetaOutputConfigParam{
-			Effort: anthropic.BetaOutputConfigEffort(opt.Effort),
-			Format: anthropic.BetaJSONOutputFormatParam{Schema: Schema()},
-		},
-		// If a safety classifier declines, the server retries on a fallback model
-		// inside the same call instead of failing the review.
-		Fallbacks: anthropic.BetaFallbacksParamUnion{OfDefault: constant.ValueOf[constant.Default]()},
-		Betas:     []anthropic.AnthropicBeta{anthropic.AnthropicBetaServerSideFallback2026_07_01},
-	}
-
-	stream := client.Beta.Messages.NewStreaming(ctx, params)
-	msg := anthropic.BetaMessage{}
-	for stream.Next() {
-		if err := msg.Accumulate(stream.Current()); err != nil {
-			return nil, nil, fmt.Errorf("stream: %w", err)
-		}
-	}
-	if err := stream.Err(); err != nil {
-		return nil, nil, fmt.Errorf("claude: %w", err)
-	}
-
-	switch msg.StopReason {
-	case anthropic.BetaStopReasonRefusal:
-		return nil, nil, fmt.Errorf("model declined to review this diff (%s)", msg.StopDetails.Category)
-	case anthropic.BetaStopReasonMaxTokens:
-		return nil, nil, fmt.Errorf("review hit the output limit; try a smaller PR")
-	}
-
-	var text strings.Builder
-	for _, b := range msg.Content {
-		if t, ok := b.AsAny().(anthropic.BetaTextBlock); ok {
-			text.WriteString(t.Text)
-		}
-	}
-	var r Review
-	if err := json.Unmarshal([]byte(text.String()), &r); err != nil {
-		return nil, nil, fmt.Errorf("parse review JSON: %w", err)
-	}
-
-	u := &Usage{
-		Model:        string(msg.Model),
-		InputTokens:  msg.Usage.InputTokens + msg.Usage.CacheCreationInputTokens + msg.Usage.CacheReadInputTokens,
-		OutputTokens: msg.Usage.OutputTokens,
-		CacheRead:    msg.Usage.CacheReadInputTokens,
-	}
-	if p, ok := pricing[u.Model]; ok {
-		u.CostUSD = float64(u.InputTokens)/1e6*p[0] + float64(u.OutputTokens)/1e6*p[1]
-	}
-	return &r, u, nil
-}
 
 // Finalize enforces the rules the model can't be trusted with: every hunk is in
 // exactly one unit, path rules raise tiers, ids are valid, text stays short.
@@ -126,7 +18,7 @@ func Finalize(r *Review, d *diff.Diff, rules []risk.Rule) {
 
 	for i := range r.Units {
 		u := &r.Units[i]
-		if u.ID == "" {
+		if u.ID == "" || strings.ContainsAny(u.ID, " /#") {
 			u.ID = fmt.Sprintf("U%d", i+1)
 		}
 		var hs []string
@@ -150,7 +42,6 @@ func Finalize(r *Review, d *diff.Diff, rules []risk.Rule) {
 				u.Risk = "medium"
 			}
 		}
-		// A failing check always needs a person.
 		for _, c := range u.Checks {
 			if c.Status == "not_done" {
 				u.Tier = string(risk.Human)
@@ -159,6 +50,7 @@ func Finalize(r *Review, d *diff.Diff, rules []risk.Rule) {
 
 		u.Title = clampWords(u.Title, 10)
 		u.Brief = clampWords(u.Brief, 45)
+		u.Question = clampWords(u.Question, 26)
 		u.RiskReason = clampWords(u.RiskReason, 16)
 		for j := range u.Notes {
 			u.Notes[j].Note = clampWords(u.Notes[j].Note, 26)
@@ -198,14 +90,29 @@ func Finalize(r *Review, d *diff.Diff, rules []risk.Rule) {
 		})
 	}
 
-	// Drop units that ended with no hunks.
 	kept := r.Units[:0]
+	ids := map[string]bool{}
 	for _, u := range r.Units {
-		if len(u.Hunks) > 0 {
-			kept = append(kept, u)
+		if len(u.Hunks) == 0 {
+			continue
 		}
+		for ids[u.ID] {
+			u.ID += "b"
+		}
+		ids[u.ID] = true
+		kept = append(kept, u)
 	}
 	r.Units = kept
+
+	st := &r.Story
+	st.Why, st.What = clampWords(st.Why, 50), clampWords(st.What, 60)
+	st.Before, st.After = clampWords(st.Before, 30), clampWords(st.After, 30)
+	for i := range st.Impact {
+		st.Impact[i].Area, st.Impact[i].Change = clampWords(st.Impact[i].Area, 5), clampWords(st.Impact[i].Change, 24)
+	}
+	for i := range st.Focus {
+		st.Focus[i] = clampWords(st.Focus[i], 18)
+	}
 
 	if r.Verdict == "approve" {
 		for _, u := range r.Units {
@@ -215,6 +122,102 @@ func Finalize(r *Review, d *diff.Diff, rules []risk.Rule) {
 				}
 			}
 		}
+	}
+}
+
+// Merge attaches verified findings to units and lets them drive tiers, asks
+// and the verdict. A not_done check the verifiers rejected is downgraded.
+func Merge(r *Review, d *diff.Diff, fs []Finding) {
+	unitOfHunk := map[string]int{}
+	unitOfFile := map[string]int{}
+	byID := d.HunkByID()
+	for i, u := range r.Units {
+		for _, h := range u.Hunks {
+			unitOfHunk[h] = i
+			if hk := byID[h]; hk != nil {
+				if _, ok := unitOfFile[hk.File]; !ok {
+					unitOfFile[hk.File] = i
+				}
+			}
+		}
+	}
+	anyImportant := false
+	for k := range fs {
+		f := &fs[k]
+		f.Title = clampWords(f.Title, 12)
+		f.Scenario = clampWords(f.Scenario, 50)
+		f.Fix = clampWords(f.Fix, 32)
+		ui, ok := unitOfHunk[f.Hunk]
+		if !ok {
+			ui, ok = unitOfFile[f.File]
+		}
+		if ok {
+			f.Unit = r.Units[ui].ID
+		}
+
+		// Link back to the check this came from (or was merged with).
+		if f.CheckRef != "" {
+			parts := strings.SplitN(f.CheckRef, ":", 2)
+			a, _ := strconv.Atoi(parts[0])
+			b, _ := strconv.Atoi(parts[1])
+			if a < len(r.Units) && b < len(r.Units[a].Checks) {
+				c := &r.Units[a].Checks[b]
+				switch f.Status {
+				case "confirmed":
+					c.Finding = f.ID
+					if f.Severity == "minor" {
+						c.Detail = clampWords(c.Detail, 28) + " (minor impact)"
+					}
+				case "rejected", "nit":
+					c.Status, c.Disputed = "no_evidence", true
+					c.Detail = clampWords(c.Detail, 24) + " Verifiers could not confirm this."
+				}
+			}
+		}
+
+		if f.Status != "confirmed" || !ok {
+			continue
+		}
+		u := &r.Units[ui]
+		u.Findings = append(u.Findings, f.ID)
+		if f.Introduced {
+			if f.Severity != "minor" {
+				anyImportant = true
+				u.Tier = "human"
+				if u.Risk == "low" {
+					u.Risk = "medium"
+				}
+			}
+			if f.Fix != "" {
+				ask := f.Title + ": " + f.Fix
+				dup := false
+				for _, a := range u.Ask {
+					if strings.EqualFold(a, ask) {
+						dup = true
+					}
+				}
+				if !dup {
+					u.Ask = append(u.Ask, ask)
+				}
+			}
+		}
+	}
+	r.Findings = fs
+
+	// The verdict follows the evidence.
+	notDone := false
+	for _, u := range r.Units {
+		for _, c := range u.Checks {
+			if c.Status == "not_done" {
+				notDone = true
+			}
+		}
+	}
+	switch {
+	case anyImportant || notDone:
+		r.Verdict = "request_changes"
+	case r.Verdict == "request_changes":
+		r.Verdict = "needs_decision" // the model asked for changes but nothing survived verification
 	}
 }
 

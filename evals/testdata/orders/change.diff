@@ -1,0 +1,46 @@
+diff --git a/src/orders.ts b/src/orders.ts
+--- a/src/orders.ts
++++ b/src/orders.ts
+@@ -2,6 +2,8 @@
+ 
+ export class NotFound extends Error {}
+ 
++export const MAX_PAGE_SIZE = 100;
++
+ /** Every query is scoped to the caller's tenant. */
+ export class OrderService {
+   constructor(private db: Db, private payments: Payments) {}
+@@ -22,4 +24,33 @@
+     );
+     if (res.rowCount === 0) throw new NotFound(id);
+   }
++
++  /** Lists a tenant's orders, newest first. page is 1-based. */
++  async list(tenantId: string, page: number, pageSize: number): Promise<Order[]> {
++    const size = Math.min(pageSize, MAX_PAGE_SIZE);
++    const offset = page * size;
++    return this.db.query<Order>(
++      "SELECT * FROM orders WHERE tenant_id = $1 AND status <> 'deleted' ORDER BY created_at DESC LIMIT $2 OFFSET $3",
++      [tenantId, size, offset],
++    );
++  }
++
++  /** Soft-deletes an order. */
++  async remove(tenantId: string, id: string): Promise<void> {
++    const res = await this.db.exec("UPDATE orders SET status = 'deleted' WHERE id = $1", [id]);
++    if (res.rowCount === 0) throw new NotFound(id);
++  }
++
++  /** Refunds a paid order in full and records it. Returns true when refunded. */
++  async refund(tenantId: string, id: string): Promise<boolean> {
++    const order = await this.get(tenantId, id);
++    if (order.status !== "paid") return false;
++    try {
++      await this.payments.refund(order.id, order.totalCents);
++    } catch (e) {
++      console.warn("refund failed", e);
++    }
++    await this.db.exec("UPDATE orders SET status = 'refunded' WHERE id = $1 AND tenant_id = $2", [id, tenantId]);
++    return true;
++  }
+ }

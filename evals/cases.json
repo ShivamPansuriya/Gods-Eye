@@ -1,0 +1,22 @@
+[
+  {
+    "name": "retry",
+    "fixture": "testdata/retry",
+    "title": "Index writes retry when the database is busy",
+    "body": "Commit now retries sqlite busy errors up to 3 times with backoff, then returns ErrIndexBusy. Writers must still return promptly when ctx is cancelled.",
+    "expect": [
+      { "file": "internal/index/writer.go", "from": 29, "to": 29, "bug": "time.Sleep ignores ctx cancellation between retries" }
+    ]
+  },
+  {
+    "name": "orders",
+    "fixture": "testdata/orders",
+    "title": "Order listing, soft delete and refunds",
+    "body": "Adds paginated listing (1-based pages), soft delete, and full refunds for paid orders.",
+    "expect": [
+      { "file": "src/orders.ts", "from": 31, "to": 31, "bug": "1-based page makes offset skip the first page" },
+      { "file": "src/orders.ts", "from": 40, "to": 40, "bug": "soft delete has no tenant_id filter (cross-tenant delete)" },
+      { "file": "src/orders.ts", "from": 49, "to": 54, "bug": "failed refund is swallowed and the order is still marked refunded" }
+    ]
+  }
+]

@@ -23,10 +23,12 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/v2/option"
 
 	"github.com/ShivamPansuriya/gods-eye/internal/diff"
+	"github.com/ShivamPansuriya/gods-eye/internal/eval"
 	"github.com/ShivamPansuriya/gods-eye/internal/render"
 	"github.com/ShivamPansuriya/gods-eye/internal/review"
 	"github.com/ShivamPansuriya/gods-eye/internal/risk"
 	"github.com/ShivamPansuriya/gods-eye/internal/source"
+	"github.com/ShivamPansuriya/gods-eye/internal/workspace"
 )
 
 var version = "dev"
@@ -38,6 +40,12 @@ Usage:
   gods-eye --local [--base main] review the current branch against a base, no GitHub needed
   gods-eye --diff x.diff         review a saved diff
   gods-eye --from report.json    re-render a saved review without calling the API
+  gods-eye eval evals/cases.json score the reviewer against known bugs
+
+Depth (like Quick / Standard / Deep):
+  quick     one mapping agent: units, tiers, flows, checks
+  standard  + bug hunters over slices of the diff, each finding verified by 3 independent voters
+  deep      + two hunter lenses per slice (logic, contracts)
 
 Flags:
 `
@@ -51,6 +59,14 @@ func main() {
 		title    = flag.String("title", "", "PR title for --diff / --local (default: from commits)")
 		model    = flag.String("model", "claude-opus-5-5", "Claude model")
 		effort   = flag.String("effort", "high", "reasoning effort: low | medium | high | xhigh | max")
+		depth    = flag.String("depth", "standard", "quick | standard | deep")
+		vEffort  = flag.String("verify-effort", "medium", "reasoning effort for the verifiers")
+		parallel = flag.Int("parallel", 8, "max concurrent API calls")
+		budget   = flag.Float64("budget", 15, "stop starting new verifications above this spend, in USD")
+		verify   = flag.String("verify-cmd", "", "run this command in the checkout (tests, build) and use its output as evidence")
+		fresh    = flag.Bool("fresh", false, "ignore the previous round; review the whole PR again")
+		wsDir    = flag.String("workspace", "", "repository checkout for code access (default: current repo)")
+		verbose  = flag.Bool("v", false, "log every agent")
 		out      = flag.String("out", "", "write the HTML page here (default: .godseye/<pr>.html)")
 		noOpen   = flag.Bool("no-open", false, "don't open the page in a browser")
 		serve    = flag.String("serve", "", "serve the page over HTTP on this `addr` (e.g. :8080) instead of opening a file")
@@ -63,6 +79,10 @@ func main() {
 		showVer  = flag.Bool("version", false, "print version")
 	)
 	flag.Usage = func() { fmt.Fprint(os.Stderr, usage); flag.PrintDefaults() }
+	if len(os.Args) > 1 && os.Args[1] == "eval" {
+		runEval(os.Args[2:])
+		return
+	}
 	flag.Parse()
 	if *showVer {
 		fmt.Println("gods-eye", version)
@@ -86,26 +106,54 @@ func main() {
 		if len(d.Hunks()) == 0 {
 			fail("no changes found in the diff")
 		}
+		ws := openWorkspace(*wsDir, in, *diffFile != "")
 		if *dryRun {
-			fmt.Println(review.Prompt(in, d))
+			fmt.Println(review.DryRun(in, d, ws))
 			return
 		}
+		rules := risk.Load(".godseye.json")
 		var r *review.Review
-		var u *review.Usage
 		if *revFile != "" {
 			b, err := os.ReadFile(*revFile)
 			check(err)
 			r = &review.Review{}
 			check(json.Unmarshal(b, r))
+			review.Finalize(r, d, rules)
+			review.Merge(r, d, r.Findings)
 		} else {
-			step("Reviewing %d files, %d hunks with %s (effort %s)…", len(d.Files), len(d.Hunks()), *model, *effort)
+			key := stateKey(in)
+			var prev *review.State
+			if !*fresh {
+				prev = review.LoadState(".godseye", key)
+			}
+			step("Reviewing %d files, %d hunks · %s · depth %s · effort %s", len(d.Files), len(d.Hunks()), *model, *depth, *effort)
+			logf := func(s string) { step("%s", s) }
+			if !*verbose {
+				logf = func(s string) {
+					if !strings.HasPrefix(s, "hunt-") && !strings.HasPrefix(s, "verify-") && !strings.Contains(s, "submitted after") {
+						step("%s", s)
+					}
+				}
+			}
 			t0 := time.Now()
-			r, u, err = review.Run(ctx, newClient(), in, d, review.Options{Model: *model, Effort: *effort})
+			r, err = review.Run(ctx, newClient(), in, d, ws, rules, review.Options{
+				Model: *model, Effort: *effort, VerifyEff: *vEffort, Depth: *depth, Parallel: *parallel, Budget: *budget,
+				VerifyCmd: *verify, Prev: prev, Log: logf,
+			})
 			check(err)
-			step("Done in %s · %d units · %d in / %d out tokens%s", time.Since(t0).Round(time.Second), len(r.Units), u.InputTokens, u.OutputTokens, costStr(u))
+			p := r.Pipeline
+			step("Done in %s · %d units · %d confirmed, %d pre-existing, %d rejected, %d unverifiable · $%.2f",
+				time.Since(t0).Round(time.Second), len(r.Units), p.Confirmed, p.PreExisting, p.Rejected, p.Unverifiable, p.CostUSD)
+			for _, e := range p.Errors {
+				step("warning: %s", e)
+			}
+			if in.HeadSHA != "" {
+				if err := review.SaveState(".godseye", key, in.HeadSHA, r); err != nil {
+					step("warning: could not save state: %v", err)
+				}
+			}
 		}
-		review.Finalize(r, d, risk.Load(".godseye.json"))
-		rep = render.NewReport(in, d, r, u)
+		rep = render.NewReport(in, d, r)
 	}
 
 	if *save != "" {
@@ -177,11 +225,34 @@ func load(local bool, base, diffFile, title, repo, pr string) (*source.Input, er
 	}
 }
 
-func costStr(u *review.Usage) string {
-	if u.CostUSD == 0 {
-		return ""
+// openWorkspace gives agents read access to the code at the PR head.
+func openWorkspace(dir string, in *source.Input, diffOnly bool) *workspace.Workspace {
+	if dir == "" && diffOnly {
+		return nil
 	}
-	return fmt.Sprintf(" · ~$%.3f", u.CostUSD)
+	if dir == "" {
+		dir = "."
+	}
+	ref := in.HeadSHA
+	if ref != "" && !in.LocalMode {
+		// PR mode: make sure the head commit is present locally.
+		if _, err := workspace.Open(dir, ref); err != nil && in.Number > 0 {
+			_ = exec.Command("git", "-C", dir, "fetch", "--depth=50", "origin", fmt.Sprintf("pull/%d/head", in.Number)).Run()
+		}
+	}
+	ws, err := workspace.Open(dir, ref)
+	if err != nil {
+		step("No code access (%v); reviewing from the diff only", err)
+		return nil
+	}
+	return ws
+}
+
+func stateKey(in *source.Input) string {
+	if in.Number > 0 {
+		return fmt.Sprintf("%s#%d", in.Repo, in.Number)
+	}
+	return in.Repo + "@" + in.HeadRef
 }
 
 func openBrowser(path string) {
@@ -219,12 +290,13 @@ func fail(format string, a ...any) {
 
 // newClient uses ANTHROPIC_API_KEY (the SDK default) and falls back to CLAUDE_API_KEY.
 func newClient() anthropic.Client {
+	opts := []option.RequestOption{option.WithMaxRetries(5)}
 	if os.Getenv("ANTHROPIC_API_KEY") == "" && os.Getenv("ANTHROPIC_AUTH_TOKEN") == "" {
 		if k := os.Getenv("CLAUDE_API_KEY"); k != "" {
-			return anthropic.NewClient(option.WithAPIKey(k))
+			opts = append(opts, option.WithAPIKey(k))
 		}
 	}
-	return anthropic.NewClient()
+	return anthropic.NewClient(opts...)
 }
 
 // serveFile serves the review page at / until interrupted.
@@ -240,4 +312,68 @@ func serveFile(addr, file string) error {
 	})
 	step("Serving review at http://localhost:%d (Ctrl-C to stop)", ln.Addr().(*net.TCPAddr).Port)
 	return http.Serve(ln, mux)
+}
+
+func runEval(args []string) {
+	fs := flag.NewFlagSet("eval", flag.ExitOnError)
+	model := fs.String("model", "claude-opus-5-5", "Claude model")
+	effort := fs.String("effort", "high", "reasoning effort")
+	depth := fs.String("depth", "standard", "quick | standard | deep")
+	parallel := fs.Int("parallel", 8, "max concurrent API calls")
+	only := fs.String("case", "", "run only this case")
+	out := fs.String("out", "", "write results JSON here")
+	fs.Parse(args)
+	if fs.NArg() == 0 {
+		fail("usage: gods-eye eval [flags] cases.json")
+	}
+	cases, err := eval.Load(fs.Arg(0))
+	check(err)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	client := newClient()
+	var results []eval.Result
+	var cost float64
+	caught, total := 0, 0
+	for _, c := range cases {
+		if *only != "" && c.Name != *only {
+			continue
+		}
+		step("Case %s (%d known bugs)…", c.Name, len(c.Expect))
+		res := eval.Run(ctx, client, c, review.Options{Model: *model, Effort: *effort, Depth: *depth, Parallel: *parallel,
+			Log: func(s string) {
+				if !strings.HasPrefix(s, "hunt-") && !strings.HasPrefix(s, "verify-") && !strings.Contains(s, "submitted after") {
+					step("  %s", s)
+				}
+			}})
+		if res.Error != "" {
+			step("  ✕ %s", res.Error)
+		}
+		for _, x := range res.Caught {
+			step("  ✓ caught   %s", x)
+		}
+		for _, x := range res.Missed {
+			tag := ""
+			for _, r := range res.Rejected {
+				if r == x {
+					tag = " (found, then rejected by voters)"
+				}
+			}
+			step("  ✕ missed   %s%s", x, tag)
+		}
+		for _, f := range res.Extra {
+			step("  + extra    %s:%d %s", f.File, f.Line, f.Title)
+		}
+		step("  recall %.0f%% · %d candidates · $%.2f · %.0fs", res.Recall*100, res.Candidates, res.CostUSD, res.Seconds)
+		caught += len(res.Caught)
+		total += len(res.Caught) + len(res.Missed)
+		cost += res.CostUSD
+		results = append(results, res)
+	}
+	if total > 0 {
+		step("TOTAL recall %d/%d (%.0f%%) · $%.2f", caught, total, float64(caught)/float64(total)*100, cost)
+	}
+	if *out != "" {
+		b, _ := json.MarshalIndent(results, "", "  ")
+		check(os.WriteFile(*out, b, 0o644))
+	}
 }

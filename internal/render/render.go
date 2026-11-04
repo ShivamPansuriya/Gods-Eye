@@ -35,16 +35,15 @@ type Report struct {
 	Meta   Meta           `json:"meta"`
 	Review *review.Review `json:"review"`
 	Files  []*diff.File   `json:"files"`
-	Usage  *review.Usage  `json:"usage,omitempty"`
 }
 
 // NewReport assembles a report.
-func NewReport(in *source.Input, d *diff.Diff, r *review.Review, u *review.Usage) *Report {
+func NewReport(in *source.Input, d *diff.Diff, r *review.Review) *Report {
 	m := Meta{Repo: in.Repo, Number: in.Number, URL: in.URL, Title: in.Title, HeadSHA: in.HeadSHA}
 	for _, is := range in.Issues {
 		m.Issues = append(m.Issues, is.Number)
 	}
-	return &Report{Meta: m, Review: r, Files: d.Files, Usage: u}
+	return &Report{Meta: m, Review: r, Files: d.Files}
 }
 
 // HTML writes the review page.
@@ -76,6 +75,37 @@ func Markdown(w io.Writer, rep *Report) {
 	r := rep.Review
 	fmt.Fprintf(w, "### 👁 God's Eye — %s\n\n", verdictText[r.Verdict])
 	fmt.Fprintf(w, "**%s**  \n%s\n\n", r.Title, r.ELI5)
+
+	var bugs, pre []string
+	for _, f := range r.Findings {
+		if f.Status != "confirmed" {
+			continue
+		}
+		line := fmt.Sprintf("- **%s** (`%s:%d`): %s", f.Title, f.File, f.Line, f.Scenario)
+		if f.Fix != "" {
+			line += " *Fix:* " + f.Fix
+		}
+		if n := len(f.Votes); n > 0 {
+			real := 0
+			for _, v := range f.Votes {
+				if v.Real {
+					real++
+				}
+			}
+			line += fmt.Sprintf(" <sub>%d/%d verifiers</sub>", real, n)
+		}
+		if f.Introduced {
+			bugs = append(bugs, line)
+		} else {
+			pre = append(pre, line)
+		}
+	}
+	if len(bugs) > 0 {
+		fmt.Fprintf(w, "**🐞 Verified bugs (%d)**\n%s\n\n", len(bugs), strings.Join(bugs, "\n"))
+	}
+	if len(pre) > 0 {
+		fmt.Fprintf(w, "<details><summary>Pre-existing bugs nearby (%d)</summary>\n\n%s\n</details>\n\n", len(pre), strings.Join(pre, "\n"))
+	}
 
 	tiers := []struct{ key, label string }{{"human", "🧑 Needs your decision"}, {"agent", "🤖 Agent reviewed"}, {"static", "⚙️ Static / CI"}}
 	for _, t := range tiers {
