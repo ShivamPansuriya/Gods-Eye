@@ -20,24 +20,26 @@
   --line:#2e2e33; --hover:#26262b; --accent:#e0b44a; --accent-bg:#2c2618;
   --human:#e08bd6; --human-bg:#2f1d2d; --agent:#7cc0e0; --agent-bg:#192a33; --static:#a9bf95; --static-bg:#1f261a;
   --add:#16291d; --add-ink:#8fd8a5; --add-gut:#1d3626; --del:#2f1a1a; --del-ink:#f0a0a0; --del-gut:#3d2121;
-  --ok:#6fcf97; --bad:#f28b82; --warn:#f2c46d;
+  --ok:#6fcf97; --bad:#f28b82; --warn:#f2c46d; color-scheme:dark;
 }}
 :root[data-theme="dark"]{
   --bg:#17171a; --panel:#1e1e22; --side:#1a1a1d; --ink:#ecebe7; --muted:#a09d95; --faint:#6e6b65;
   --line:#2e2e33; --hover:#26262b; --accent:#e0b44a; --accent-bg:#2c2618;
   --human:#e08bd6; --human-bg:#2f1d2d; --agent:#7cc0e0; --agent-bg:#192a33; --static:#a9bf95; --static-bg:#1f261a;
   --add:#16291d; --add-ink:#8fd8a5; --add-gut:#1d3626; --del:#2f1a1a; --del-ink:#f0a0a0; --del-gut:#3d2121;
-  --ok:#6fcf97; --bad:#f28b82; --warn:#f2c46d;
+  --ok:#6fcf97; --bad:#f28b82; --warn:#f2c46d; color-scheme:dark;
 }
 *{box-sizing:border-box}
 html,body{margin:0;height:100%}
 body{background:var(--bg);color:var(--ink);font:14px/1.5 var(--sans);-webkit-font-smoothing:antialiased}
 button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media (prefers-reduced-motion: reduce){*{animation:none!important;scroll-behavior:auto!important}}
 code,.mono{font-family:var(--mono);font-size:12.5px}
 a{color:inherit}
 
 /* top bar */
-.top{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:12px;height:48px;padding:0 16px;background:var(--panel);border-bottom:1px solid var(--line)}
+.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;display:flex;align-items:center;gap:12px;height:48px;padding:0 16px;background:var(--panel);border-bottom:1px solid var(--line)}
 .brand{font-weight:650;display:flex;align-items:center;gap:8px;white-space:nowrap}
 .brand svg{width:18px;height:18px}
 .crumbs{color:var(--muted);display:flex;gap:6px;align-items:center;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
@@ -52,7 +54,7 @@ a{color:inherit}
 
 /* layout */
 .wrap{display:grid;grid-template-columns:270px 1fr;min-height:calc(100% - 48px)}
-.side{background:var(--side);border-right:1px solid var(--line);padding:14px 10px 90px;position:sticky;top:48px;height:calc(100vh - 48px);overflow:auto}
+.side{background:var(--side);border-right:1px solid var(--line);padding:14px 10px 90px;position:sticky;top:calc(48px + env(safe-area-inset-top,0px));height:calc(100vh - 48px);overflow:auto}
 .main{padding:28px 32px 120px;max-width:1060px;width:100%;margin:0 auto;min-width:0}
 
 .side .ov{display:flex;gap:8px;align-items:center;padding:8px 10px;border-radius:8px;color:var(--muted);text-decoration:none}
@@ -176,7 +178,7 @@ ul.plain{margin:0;padding-left:18px} ul.plain li{margin:4px 0}
 .urow:hover .t{text-decoration:underline}
 
 /* footer action bar */
-.bar{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;z-index:6;display:flex;align-items:center;gap:6px;background:#1d1d1b;color:#f2f1ec;border-radius:12px;padding:6px;box-shadow:0 8px 30px rgba(0,0,0,.25);border:1px solid #3a3a36;font-size:13px;max-width:calc(100% - 32px)}
+.bar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(18px + env(safe-area-inset-bottom,0px));z-index:6;display:flex;align-items:center;gap:6px;background:#1d1d1b;color:#f2f1ec;border-radius:12px;padding:6px;box-shadow:0 8px 30px rgba(0,0,0,.25);border:1px solid #3a3a36;font-size:13px;max-width:calc(100% - 32px)}
 .bar .info{padding:0 10px;color:#b9b6ad;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .bar button{border:0;border-radius:8px;padding:7px 14px;background:none;color:inherit;white-space:nowrap}
 .bar button:hover{background:#34342f}
@@ -245,7 +247,10 @@ function failing(u){ return (u.checks||[]).some(c=>c.status==="not_done") }
 function brief(s){ return esc(s).replace(/\[\[(.+?)\]\]/g, "<mark>$1</mark>") }
 function bars(n){ let s='<span class="bars">'; for(let i=1;i<=4;i++) s+=`<i class="${i<=n?'f':''}" style="height:${3+i*2}px"></i>`; return s+'</span>' }
 function toast(msg){ const t=$("#toast"); t.textContent=msg; t.classList.add("on"); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove("on"),2200) }
-function copy(text, msg){ (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(()=>toast(msg), ()=>{ prompt("Copy:", text) }) }
+function copy(text, msg){
+  const fallback = () => { const ta=document.createElement("textarea"); ta.value=text; ta.setAttribute("readonly",""); ta.style.cssText="position:fixed;opacity:0"; document.body.appendChild(ta); ta.select(); let ok=false; try{ ok=document.execCommand("copy") }catch(e){} ta.remove(); toast(ok ? msg : "Copy blocked here. Command: " + text.slice(0,80)) };
+  try { navigator.clipboard.writeText(text).then(()=>toast(msg), fallback) } catch(e){ fallback() }
+}
 
 /* header */
 $("#crumbs").innerHTML = `<span class="hide-sm">${esc(META.repo||"local")}</span><span class="hide-sm">/</span><b>${META.number?"#"+META.number+" ":""}${esc(META.title||R.title)}</b>${META.headSha?`<span class="sha hide-sm">${esc(META.headSha.slice(0,7))}</span>`:""}`;
