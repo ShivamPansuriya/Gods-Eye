@@ -1,0 +1,62 @@
+{
+  "title": "Index writes retry when the database is busy",
+  "eli5": "When the database is briefly locked, saving now waits and tries again instead of failing straight away. If it is still locked after three tries, it gives up with a clear error.",
+  "verdict": "request_changes",
+  "units": [
+    {
+      "id": "U1",
+      "title": "Index writes retry when the database is busy",
+      "hunks": ["H2", "H3"],
+      "tier": "human",
+      "risk": "medium",
+      "risk_reason": "Changes error contract callers depend on",
+      "brief": "Commit used to fail on the first lock clash. It now [[retries up to three times with growing waits]], then returns ErrIndexBusy. [[The wait ignores cancellation]], so a cancelled request still sleeps. [[No test forces the busy path]].",
+      "flow": {
+        "before": [
+          {"label": "Commit", "edge": "", "state": "same", "hunk": "H2", "line": 23},
+          {"label": "BeginTx", "edge": "busy", "state": "same", "hunk": "H2", "line": 35},
+          {"label": "fails", "edge": "", "state": "removed", "hunk": "", "line": 0}
+        ],
+        "after": [
+          {"label": "Commit", "edge": "", "state": "same", "hunk": "H2", "line": 23},
+          {"label": "commitOnce", "edge": "busy", "state": "added", "hunk": "H2", "line": 34},
+          {"label": "sleep, retry ×3", "edge": "", "state": "added", "hunk": "H2", "line": 29},
+          {"label": "ErrIndexBusy", "edge": "", "state": "added", "hunk": "H2", "line": 31}
+        ]
+      },
+      "notes": [
+        {"hunk": "H2", "line": 24, "code": "for attempt := range maxAttempts {", "note": "Counts 0 to 2. Ranging over an integer needs Go 1.22 or newer."},
+        {"hunk": "H2", "line": 26, "code": "if !errors.Is(err, sqlite3.ErrBusy) {", "note": "Only a busy error retries. Wrapped busy errors also match."},
+        {"hunk": "H2", "line": 29, "code": "time.Sleep(backoff(attempt))", "note": "Blocks the whole wait. Cancelling ctx cannot interrupt it."}
+      ],
+      "checks": [
+        {"criterion": "Busy writes are retried", "status": "done", "detail": "Commit tries up to three times with 50, 100, 200 ms waits, then returns ErrIndexBusy.", "source": "pr", "evidence": {"kind": "code", "hunk": "H2", "line": 24, "ref": "writer.go lines 24-31"}},
+        {"criterion": "Cancelling a request stops index work", "status": "not_done", "detail": "Between attempts the code sleeps without watching ctx, so a cancelled request still waits up to 350 ms.", "source": "guidance", "evidence": {"kind": "code", "hunk": "H2", "line": 29, "ref": "writer.go line 29"}},
+        {"criterion": "Busy path is covered by a test", "status": "no_evidence", "detail": "No test makes the database busy, so the retry and final ErrIndexBusy never run under test.", "source": "inferred", "evidence": {"kind": "gap", "hunk": "", "line": 0, "ref": "no test hits busy path"}}
+      ],
+      "blast": [
+        {"title": "Callers see a new error", "detail": "sync.flush treats any Commit error as fatal, so a busy index will now stop a sync with ErrIndexBusy.", "basis": "inferred"}
+      ],
+      "ask": [
+        "Replace time.Sleep with a select on a timer and ctx.Done(), as the index README asks.",
+        "Add a test that forces sqlite3.ErrBusy and expects three attempts, then ErrIndexBusy."
+      ]
+    },
+    {
+      "id": "U2",
+      "title": "README documents retry and cancellation",
+      "hunks": ["H1"],
+      "tier": "static",
+      "risk": "low",
+      "risk_reason": "Docs only",
+      "brief": "Adds two lines saying [[writers stop when ctx is done]] and retry three times. The first claim is not true yet.",
+      "flow": {"before": [], "after": []},
+      "notes": [],
+      "checks": [],
+      "blast": [],
+      "ask": []
+    }
+  ],
+  "not_checked": ["Retry under real lock contention", "Behaviour with a cancelled context", "Go version in go.mod is 1.22+"],
+  "watch_after_deploy": ["Rate of ErrIndexBusy in sync logs", "p99 index write latency"]
+}

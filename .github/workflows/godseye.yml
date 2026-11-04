@@ -1,0 +1,30 @@
+name: God's Eye review
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - name: Install God's Eye
+        run: go install github.com/ShivamPansuriya/gods-eye@latest
+      - name: Review
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: gods-eye ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --comment --no-open --out review.html
+      - uses: actions/upload-artifact@v4
+        with:
+          name: godseye-review
+          path: review.html

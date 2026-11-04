@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Review</title>
+<style>
+:root{
+  --bg:#f7f6f2; --panel:#ffffff; --side:#f1efe9; --ink:#1d1d1b; --muted:#6f6c64; --faint:#a19d93;
+  --line:#e3e0d8; --hover:#ebe8e0;
+  --accent:#b8860b; --accent-bg:#fbf3dc;
+  --human:#9b2c8f; --human-bg:#f8e9f6; --agent:#2f6f8f; --agent-bg:#e6f1f6; --static:#5c6b4e; --static-bg:#edf1e7;
+  --add:#e6f4ea; --add-ink:#1f6f3a; --add-gut:#cde9d5; --del:#fbe9e9; --del-ink:#a12b2b; --del-gut:#f3d0d0;
+  --ok:#2e7d4f; --bad:#b3261e; --warn:#b7791f;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:ui-sans-serif,-apple-system,"Segoe UI",Inter,Roboto,sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#17171a; --panel:#1e1e22; --side:#1a1a1d; --ink:#ecebe7; --muted:#a09d95; --faint:#6e6b65;
+  --line:#2e2e33; --hover:#26262b; --accent:#e0b44a; --accent-bg:#2c2618;
+  --human:#e08bd6; --human-bg:#2f1d2d; --agent:#7cc0e0; --agent-bg:#192a33; --static:#a9bf95; --static-bg:#1f261a;
+  --add:#16291d; --add-ink:#8fd8a5; --add-gut:#1d3626; --del:#2f1a1a; --del-ink:#f0a0a0; --del-gut:#3d2121;
+  --ok:#6fcf97; --bad:#f28b82; --warn:#f2c46d;
+}}
+:root[data-theme="dark"]{
+  --bg:#17171a; --panel:#1e1e22; --side:#1a1a1d; --ink:#ecebe7; --muted:#a09d95; --faint:#6e6b65;
+  --line:#2e2e33; --hover:#26262b; --accent:#e0b44a; --accent-bg:#2c2618;
+  --human:#e08bd6; --human-bg:#2f1d2d; --agent:#7cc0e0; --agent-bg:#192a33; --static:#a9bf95; --static-bg:#1f261a;
+  --add:#16291d; --add-ink:#8fd8a5; --add-gut:#1d3626; --del:#2f1a1a; --del-ink:#f0a0a0; --del-gut:#3d2121;
+  --ok:#6fcf97; --bad:#f28b82; --warn:#f2c46d;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--ink);font:14px/1.5 var(--sans);-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;cursor:pointer}
+code,.mono{font-family:var(--mono);font-size:12.5px}
+a{color:inherit}
+
+ 
+.top{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:12px;height:48px;padding:0 16px;background:var(--panel);border-bottom:1px solid var(--line)}
+.brand{font-weight:650;display:flex;align-items:center;gap:8px;white-space:nowrap}
+.brand svg{width:18px;height:18px}
+.crumbs{color:var(--muted);display:flex;gap:6px;align-items:center;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.crumbs b{color:var(--ink);font-weight:550}
+.sha{font-family:var(--mono);font-size:11.5px;background:var(--side);border:1px solid var(--line);border-radius:5px;padding:1px 6px}
+.grow{flex:1}
+.pill{font-size:12px;border-radius:999px;padding:2px 10px;border:1px solid var(--line);white-space:nowrap}
+.pill.approve{color:var(--ok)} .pill.request_changes{color:var(--bad)} .pill.needs_decision{color:var(--warn)}
+.iconbtn{background:none;border:1px solid transparent;border-radius:6px;padding:4px 6px;color:var(--muted)}
+.iconbtn:hover{background:var(--hover);color:var(--ink)}
+.menu{display:none}
+
+ 
+.wrap{display:grid;grid-template-columns:270px 1fr;min-height:calc(100% - 48px)}
+.side{background:var(--side);border-right:1px solid var(--line);padding:14px 10px 90px;position:sticky;top:48px;height:calc(100vh - 48px);overflow:auto}
+.main{padding:28px 32px 120px;max-width:1060px;width:100%;margin:0 auto;min-width:0}
+
+.side .ov{display:flex;gap:8px;align-items:center;padding:8px 10px;border-radius:8px;color:var(--muted);text-decoration:none}
+.side .ov.on,.side .ov:hover{background:var(--hover);color:var(--ink)}
+.grp{margin-top:16px}
+.grp h4{margin:0 10px 6px;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);display:flex;justify-content:space-between}
+.grp h4 .n{font-family:var(--mono);letter-spacing:0}
+.u{display:block;width:100%;text-align:left;background:none;border:0;border-radius:8px;padding:8px 10px;margin:1px 0}
+.u:hover{background:var(--hover)}
+.u.on{background:var(--panel);box-shadow:0 0 0 1px var(--line)}
+.u .t{display:block;font-weight:550;line-height:1.3}
+.u .m{display:flex;gap:8px;align-items:center;margin-top:3px;font-size:12px;color:var(--muted)}
+.u.viewed .t{color:var(--muted)}
+.u .done{margin-left:auto;color:var(--ok);font-size:12px}
+.dot{width:7px;height:7px;border-radius:50%;display:inline-block}
+.r-high{background:var(--bad)} .r-medium{background:var(--warn)} .r-low{background:var(--faint)}
+.flag{font-size:11px;color:var(--bad);border:1px solid currentColor;border-radius:4px;padding:0 4px}
+
+ 
+.tag{display:inline-flex;align-items:center;gap:6px;font:600 11px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;padding:5px 8px;border-radius:5px}
+.tag.human{color:var(--human);background:var(--human-bg)} .tag.agent{color:var(--agent);background:var(--agent-bg)} .tag.static{color:var(--static);background:var(--static-bg)}
+h1{font-size:28px;line-height:1.2;margin:12px 0 14px;letter-spacing:-.01em}
+.sub{color:var(--muted);font-size:13px;display:flex;gap:14px;flex-wrap:wrap;align-items:center}
+
+ 
+.views{display:inline-flex;background:var(--side);border:1px solid var(--line);border-radius:9px;padding:3px;margin:18px 0 18px}
+.views button{border:0;background:none;padding:5px 14px;border-radius:6px;color:var(--muted);display:flex;gap:6px;align-items:center}
+.views button.on{background:var(--panel);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.bars{display:inline-flex;gap:1.5px;align-items:flex-end;height:11px}
+.bars i{width:2.5px;background:currentColor;border-radius:1px;opacity:.3}
+.bars i.f{opacity:1}
+
+.brief{font-size:17px;line-height:1.6;margin:0 0 20px;max-width:760px}
+.brief mark{background:none;color:inherit;text-decoration:underline;text-decoration-color:var(--accent);text-decoration-thickness:2px;text-underline-offset:3px}
+
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:0 0 16px}
+.card h3{margin:0 0 12px;font:600 11px/1 var(--mono);letter-spacing:.07em;text-transform:uppercase;color:var(--muted);display:flex;justify-content:space-between;gap:8px}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.cols>.card{margin:0}
+
+ 
+.flow{display:grid;grid-template-columns:auto 1fr;gap:10px 14px;align-items:center}
+.flow .lbl{font:600 10.5px/1 var(--mono);letter-spacing:.07em;color:var(--faint);text-transform:uppercase}
+.chain{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.step{font-family:var(--mono);font-size:12.5px;padding:4px 9px;border-radius:6px;border:1px solid var(--line);background:var(--bg);white-space:nowrap}
+button.step:hover{border-color:var(--accent)}
+.step.added{background:var(--add);color:var(--add-ink);border-color:transparent}
+.step.removed{background:var(--del);color:var(--del-ink);border-color:transparent;text-decoration:line-through}
+.step.changed{background:var(--accent-bg);border-color:transparent}
+.arr{color:var(--faint);font-size:12px;display:flex;align-items:center;gap:4px}
+.arr em{font-style:normal;font-family:var(--mono);font-size:11px;color:var(--muted)}
+.empty{color:var(--faint);font-size:13px}
+
+ 
+.note{padding:9px 0;border-top:1px solid var(--line)}
+.note:first-of-type{border-top:0;padding-top:0}
+.note .h{display:flex;justify-content:space-between;gap:8px}
+.note code{background:var(--accent-bg);padding:1px 6px;border-radius:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.note .ln{font-family:var(--mono);font-size:11.5px;color:var(--faint);background:none;border:0;padding:0}
+.note .ln:hover{color:var(--accent)}
+.note p{margin:4px 0 0;color:var(--muted)}
+
+ 
+.chk{display:grid;grid-template-columns:22px 1fr;gap:4px 10px;padding:12px 0;border-top:1px solid var(--line)}
+.chk:first-of-type{border-top:0;padding-top:2px}
+.ic{width:18px;height:18px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:700;margin-top:1px}
+.ic.done{color:var(--ok)} .ic.not_done{color:var(--bad)} .ic.no_evidence{color:var(--warn);border:1.5px solid currentColor;width:16px;height:16px}
+.chk .c{font-weight:600}
+.st{font:500 11px var(--mono);margin-left:8px;white-space:nowrap}
+.st.done{color:var(--ok)} .st.not_done{color:var(--bad)} .st.no_evidence{color:var(--warn)}
+.chk p{margin:2px 0 6px;color:var(--muted)}
+.ev{display:inline-flex;gap:6px;align-items:center;font-size:12px;border:1px solid var(--line);border-radius:6px;padding:2px 8px;background:var(--bg)}
+button.ev:hover{border-color:var(--accent)}
+.ev b{font-weight:600;font-family:var(--mono);font-size:11px}
+.src{font-size:11px;color:var(--faint);margin-left:6px}
+.blast .b{display:grid;grid-template-columns:22px 1fr;gap:2px 10px;padding:8px 0}
+.blast p{margin:2px 0 0;color:var(--muted)}
+.ask{background:var(--accent-bg);border-color:transparent}
+.ask ol{margin:6px 0 0;padding-left:20px}
+.ask li{margin:4px 0}
+
+ 
+table{border-collapse:collapse;width:100%}
+td,th{text-align:left;padding:6px 8px;border-top:1px solid var(--line);font-size:13px}
+th{font-weight:600;color:var(--muted);font-size:12px;border-top:0}
+.plus{color:var(--add-ink);font-family:var(--mono)} .minus{color:var(--del-ink);font-family:var(--mono)}
+.kv{display:grid;grid-template-columns:140px 1fr;gap:6px 12px;font-size:13px}
+.kv dt{color:var(--muted)} .kv dd{margin:0}
+
+ 
+.diffs{margin-top:8px}
+.dtool{display:flex;justify-content:space-between;align-items:center;margin:20px 0 10px;color:var(--muted);font-size:13px}
+.file{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin-bottom:14px;overflow:hidden}
+.fh{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:12.5px}
+.fh .n{color:var(--muted)}
+.fh label{margin-left:auto;font-family:var(--sans);font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:center}
+.hh{background:var(--side);color:var(--faint);font-family:var(--mono);font-size:11.5px;padding:4px 12px;border-top:1px solid var(--line)}
+.code{overflow-x:auto}
+.code table{min-width:100%;width:auto}
+.code{tab-size:4}
+.code td{border:0;padding:0 10px;font-family:var(--mono);font-size:12.5px;line-height:20px;white-space:pre;vertical-align:top}
+.code td.n{color:var(--faint);text-align:right;user-select:none;width:1%;padding:0 6px}
+.code td.s{width:1%;padding:0 4px 0 0;color:var(--faint);user-select:none}
+.code tr.add td{background:var(--add)} .code tr.add td.n{background:var(--add-gut)} .code tr.add td.s{color:var(--add-ink)}
+.code tr.del td{background:var(--del)} .code tr.del td.n{background:var(--del-gut)} .code tr.del td.s{color:var(--del-ink)}
+.code tr.hit td{box-shadow:inset 0 0 0 9999px rgba(184,134,11,.13)}
+.code tr.flash td{animation:fl 1.6s ease-out}
+@keyframes fl{0%{box-shadow:inset 0 0 0 9999px rgba(224,180,74,.55)}100%{box-shadow:inset 0 0 0 9999px rgba(224,180,74,0)}}
+.code td.c{width:100%}
+.mk{display:inline-block;font-family:var(--sans);font-size:10.5px;color:var(--accent);border:1px solid var(--accent);border-radius:4px;padding:0 4px;line-height:15px;margin-left:12px;white-space:nowrap}
+
+ 
+.stats{display:flex;gap:10px;flex-wrap:wrap;margin:6px 0 22px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px;min-width:120px}
+.stat b{display:block;font-size:22px;line-height:1.2}
+.stat span{color:var(--muted);font-size:12px}
+.eli5{font-size:17px;line-height:1.6;max-width:760px;margin:0 0 20px}
+ul.plain{margin:0;padding-left:18px} ul.plain li{margin:4px 0}
+.urow{display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line);cursor:pointer}
+.urow:first-of-type{border-top:0}
+.urow:hover .t{text-decoration:underline}
+
+ 
+.bar{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;z-index:6;display:flex;align-items:center;gap:6px;background:#1d1d1b;color:#f2f1ec;border-radius:12px;padding:6px;box-shadow:0 8px 30px rgba(0,0,0,.25);border:1px solid #3a3a36;font-size:13px;max-width:calc(100% - 32px)}
+.bar .info{padding:0 10px;color:#b9b6ad;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar button{border:0;border-radius:8px;padding:7px 14px;background:none;color:inherit;white-space:nowrap}
+.bar button:hover{background:#34342f}
+.bar button.pri{background:#e0b44a;color:#1d1d1b;font-weight:600}
+.bar button.pri:hover{background:#ecc463}
+.toast{position:fixed;bottom:76px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 14px;border-radius:8px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none;max-width:calc(100% - 32px)}
+.toast.on{opacity:1}
+.kbd{font-family:var(--mono);font-size:11px;color:var(--faint)}
+
+@media (max-width: 860px){
+  .wrap{grid-template-columns:1fr}
+  .side{display:none;position:fixed;top:48px;left:0;right:0;bottom:0;height:auto;z-index:4}
+  body.nav .side{display:block}
+  .menu{display:inline-block}
+  .main{padding:20px 16px 120px}
+  .cols{grid-template-columns:1fr}
+  .crumbs .hide-sm{display:none}
+  h1{font-size:23px}
+  .views button{padding:5px 9px}
+  .bar .info{display:none}
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <button class="iconbtn menu" id="menu" aria-label="Units">☰</button>
+  <div class="brand"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>God's Eye</div>
+  <div class="crumbs" id="crumbs"></div>
+  <div class="grow"></div>
+  <span class="pill" id="verdict"></span>
+  <button class="iconbtn" id="theme" aria-label="Toggle theme" title="Toggle theme"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
+</header>
+<div class="wrap">
+  <nav class="side" id="side"></nav>
+  <main class="main" id="main"></main>
+</div>
+<div class="bar" id="bar"></div>
+<div class="toast" id="toast"></div>
+
+<script type="application/json" id="data">{"meta":{"repo":"retry","title":"Retry busy index writes","headSha":"","issues":null},"review":{"title":"Index writes retry when the database is busy","eli5":"When the database is briefly locked, saving now waits and tries again instead of failing straight away. If it is still locked after three tries, it gives up with a clear error.","verdict":"request_changes","units":[{"id":"U1","title":"Index writes retry when the database is busy","hunks":["H2","H3"],"tier":"human","risk":"medium","risk_reason":"Changes error contract callers depend on","brief":"Commit used to fail on the first lock clash. It now [[retries up to three times with growing waits]], then returns ErrIndexBusy. [[The wait ignores cancellation]], so a cancelled request still sleeps. [[No test forces the busy path]].","flow":{"before":[{"label":"Commit","edge":"","state":"same","hunk":"H2","line":23},{"label":"BeginTx","edge":"busy","state":"same","hunk":"H2","line":35},{"label":"fails","edge":"","state":"removed","hunk":"","line":0}],"after":[{"label":"Commit","edge":"","state":"same","hunk":"H2","line":23},{"label":"commitOnce","edge":"busy","state":"added","hunk":"H2","line":34},{"label":"sleep, retry ×3","edge":"","state":"added","hunk":"H2","line":29},{"label":"ErrIndexBusy","edge":"","state":"added","hunk":"H2","line":31}]},"notes":[{"hunk":"H2","line":24,"code":"for attempt := range maxAttempts {","note":"Counts 0 to 2. Ranging over an integer needs Go 1.22 or newer."},{"hunk":"H2","line":26,"code":"if !errors.Is(err, sqlite3.ErrBusy) {","note":"Only a busy error retries. Wrapped busy errors also match."},{"hunk":"H2","line":29,"code":"time.Sleep(backoff(attempt))","note":"Blocks the whole wait. Cancelling ctx cannot interrupt it."}],"checks":[{"criterion":"Busy writes are retried","status":"done","detail":"Commit tries up to three times with 50, 100, 200 ms waits, then returns ErrIndexBusy.","source":"pr","evidence":{"kind":"code","hunk":"H2","line":24,"ref":"writer.go lines 24-31"}},{"criterion":"Cancelling a request stops index work","status":"not_done","detail":"Between attempts the code sleeps without watching ctx, so a cancelled request still waits up to 350 ms.","source":"guidance","evidence":{"kind":"code","hunk":"H2","line":29,"ref":"writer.go line 29"}},{"criterion":"Busy path is covered by a test","status":"no_evidence","detail":"No test makes the database busy, so the retry and final ErrIndexBusy never run under test.","source":"inferred","evidence":{"kind":"gap","hunk":"","line":0,"ref":"no test hits busy path"}}],"blast":[{"title":"Callers see a new error","detail":"sync.flush treats any Commit error as fatal, so a busy index will now stop a sync with ErrIndexBusy.","basis":"inferred"}],"ask":["Replace time.Sleep with a select on a timer and ctx.Done(), as the index README asks.","Add a test that forces sqlite3.ErrBusy and expects three attempts, then ErrIndexBusy."]},{"id":"U2","title":"README documents retry and cancellation","hunks":["H1"],"tier":"static","risk":"low","risk_reason":"Docs only","brief":"Adds two lines saying [[writers stop when ctx is done]] and retry three times. The first claim is not true yet.","flow":{"before":[],"after":[]},"notes":[],"checks":[],"blast":[],"ask":[]}],"not_checked":["Retry under real lock contention","Behaviour with a cancelled context","Go version in go.mod is 1.22+"],"watch_after_deploy":["Rate of ErrIndexBusy in sync logs","p99 index write latency"]},"files":[{"path":"internal/index/README.md","oldPath":"internal/index/README.md","status":"modified","hunks":[{"id":"H1","file":"internal/index/README.md","oldStart":1,"oldLines":3,"newStart":1,"newLines":5,"header":"","lines":[{"kind":"ctx","old":1,"new":1,"text":"# index"},{"kind":"ctx","old":2,"new":2,"text":""},{"kind":"ctx","old":3,"new":3,"text":"Writers commit batches."},{"kind":"add","old":0,"new":4,"text":""},{"kind":"add","old":0,"new":5,"text":"Writers return when ctx is done. A busy database is retried up to 3 times."}],"adds":2,"dels":0}],"adds":2,"dels":0},{"path":"internal/index/writer.go","oldPath":"internal/index/writer.go","status":"modified","hunks":[{"id":"H2","file":"internal/index/writer.go","oldStart":3,"oldLines":15,"newStart":3,"newLines":35,"header":"package index","lines":[{"kind":"ctx","old":3,"new":3,"text":"import ("},{"kind":"ctx","old":4,"new":4,"text":"\t\"context\""},{"kind":"ctx","old":5,"new":5,"text":"\t\"database/sql\""},{"kind":"add","old":0,"new":6,"text":"\t\"errors\""},{"kind":"add","old":0,"new":7,"text":"\t\"time\""},{"kind":"add","old":0,"new":8,"text":""},{"kind":"add","old":0,"new":9,"text":"\t\"github.com/mattn/go-sqlite3\""},{"kind":"ctx","old":6,"new":10,"text":")"},{"kind":"ctx","old":7,"new":11,"text":""},{"kind":"ctx","old":8,"new":12,"text":"type Writer struct{ db *sql.DB }"},{"kind":"ctx","old":9,"new":13,"text":""},{"kind":"ctx","old":10,"new":14,"text":"type Batch struct{ Rows []Row }"},{"kind":"ctx","old":11,"new":15,"text":""},{"kind":"add","old":0,"new":16,"text":"const maxAttempts = 3"},{"kind":"add","old":0,"new":17,"text":""},{"kind":"add","old":0,"new":18,"text":"// ErrIndexBusy means the database stayed locked after all retries."},{"kind":"add","old":0,"new":19,"text":"var ErrIndexBusy = errors.New(\"index: database busy\")"},{"kind":"add","old":0,"new":20,"text":""},{"kind":"ctx","old":12,"new":21,"text":"// Commit writes one batch in a single transaction."},{"kind":"del","old":13,"new":0,"text":"// It returns the database error unchanged."},{"kind":"add","old":0,"new":22,"text":"// A busy database is retried, then reported as ErrIndexBusy."},{"kind":"ctx","old":14,"new":23,"text":"func (w *Writer) Commit(ctx context.Context, b Batch) error {"},{"kind":"add","old":0,"new":24,"text":"\tfor attempt := range maxAttempts {"},{"kind":"add","old":0,"new":25,"text":"\t\terr := w.commitOnce(ctx, b)"},{"kind":"add","old":0,"new":26,"text":"\t\tif !errors.Is(err, sqlite3.ErrBusy) {"},{"kind":"add","old":0,"new":27,"text":"\t\t\treturn err"},{"kind":"add","old":0,"new":28,"text":"\t\t}"},{"kind":"add","old":0,"new":29,"text":"\t\ttime.Sleep(backoff(attempt))"},{"kind":"add","old":0,"new":30,"text":"\t}"},{"kind":"add","old":0,"new":31,"text":"\treturn ErrIndexBusy"},{"kind":"add","old":0,"new":32,"text":"}"},{"kind":"add","old":0,"new":33,"text":""},{"kind":"add","old":0,"new":34,"text":"func (w *Writer) commitOnce(ctx context.Context, b Batch) error {"},{"kind":"ctx","old":15,"new":35,"text":"\ttx, err := w.db.BeginTx(ctx, nil)"},{"kind":"ctx","old":16,"new":36,"text":"\tif err != nil {"},{"kind":"ctx","old":17,"new":37,"text":"\t\treturn err"}],"adds":21,"dels":1},{"id":"H3","file":"internal/index/writer.go","oldStart":24,"oldLines":3,"newStart":44,"newLines":7,"header":"func (w *Writer) Commit(ctx context.Context, b Batch) error {","lines":[{"kind":"ctx","old":24,"new":44,"text":"\t}"},{"kind":"ctx","old":25,"new":45,"text":"\treturn tx.Commit()"},{"kind":"ctx","old":26,"new":46,"text":"}"},{"kind":"add","old":0,"new":47,"text":""},{"kind":"add","old":0,"new":48,"text":"func backoff(attempt int) time.Duration {"},{"kind":"add","old":0,"new":49,"text":"\treturn time.Duration(50*(1\u003c\u003cattempt)) * time.Millisecond"},{"kind":"add","old":0,"new":50,"text":"}"}],"adds":4,"dels":0}],"adds":25,"dels":1}]}</script>
+<script>
+(function(){
+"use strict";
+const D = JSON.parse(document.getElementById('data').textContent);
+const R = D.review, META = D.meta;
+const HUNKS = {}; D.files.forEach(f => (f.hunks||[]).forEach(h => HUNKS[h.id] = h));
+const FILE_OF = {}; D.files.forEach(f => (f.hunks||[]).forEach(h => FILE_OF[h.id] = f));
+const TIERS = [["human","Needs your decision"],["agent","Agent reviewed"],["static","Static / CI"]];
+const VIEWS = [["facts","Facts",1],["briefed","Briefed",2],["explained","Explained",3],["guided","Guided",4]];
+const KEY = "godseye:" + (META.repo||"") + ":" + (META.number||META.headSha||"");
+
+const store = {
+  get(k, d){ try { const v = localStorage.getItem(KEY+":"+k); return v===null ? d : JSON.parse(v); } catch(e){ return d; } },
+  set(k, v){ try { localStorage.setItem(KEY+":"+k, JSON.stringify(v)); } catch(e){} }
+};
+let state = { unit: null, view: store.get("view","briefed") };
+let viewed = store.get("viewed", {});
+
+const $ = s => document.querySelector(s);
+const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const units = R.units.slice().sort((a,b) => tierRank(b.tier)-tierRank(a.tier) || riskRank(b.risk)-riskRank(a.risk));
+function tierRank(t){ return {human:2,agent:1,static:0}[t]||0 }
+function riskRank(r){ return {high:2,medium:1,low:0}[r]||0 }
+function stats(u){ let a=0,d=0; u.hunks.forEach(id=>{const h=HUNKS[id]; if(h){a+=h.adds;d+=h.dels}}); return {a,d} }
+function failing(u){ return (u.checks||[]).some(c=>c.status==="not_done") }
+function brief(s){ return esc(s).replace(/\[\[(.+?)\]\]/g, "<mark>$1</mark>") }
+function bars(n){ let s='<span class="bars">'; for(let i=1;i<=4;i++) s+=`<i class="${i<=n?'f':''}" style="height:${3+i*2}px"></i>`; return s+'</span>' }
+function toast(msg){ const t=$("#toast"); t.textContent=msg; t.classList.add("on"); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove("on"),2200) }
+function copy(text, msg){ (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(()=>toast(msg), ()=>{ prompt("Copy:", text) }) }
+
+ 
+$("#crumbs").innerHTML = `<span class="hide-sm">${esc(META.repo||"local")}</span><span class="hide-sm">/</span><b>${META.number?"#"+META.number+" ":""}${esc(META.title||R.title)}</b>${META.headSha?`<span class="sha hide-sm">${esc(META.headSha.slice(0,7))}</span>`:""}`;
+const VERDICT = {approve:"Looks good", request_changes:"Changes needed", needs_decision:"Needs a decision"};
+$("#verdict").className = "pill " + R.verdict; $("#verdict").textContent = VERDICT[R.verdict]||R.verdict;
+$("#theme").onclick = () => { const r=document.documentElement; const dark = r.dataset.theme ? r.dataset.theme==="dark" : matchMedia("(prefers-color-scheme: dark)").matches; r.dataset.theme = dark?"light":"dark"; try{localStorage.setItem("godseye:theme", r.dataset.theme)}catch(e){} };
+try { const t=localStorage.getItem("godseye:theme"); if(t) document.documentElement.dataset.theme=t } catch(e){}
+$("#menu").onclick = () => document.body.classList.toggle("nav");
+
+ 
+function renderSide(){
+  let h = `<a href="#" class="ov ${state.unit?'':'on'}" data-ov>← Overview</a>`;
+  TIERS.forEach(([t,label]) => {
+    const list = units.filter(u=>u.tier===t); if(!list.length) return;
+    const done = list.filter(u=>viewed[u.id]).length;
+    h += `<div class="grp"><h4>${label}<span class="n">${done}/${list.length}</span></h4>`;
+    list.forEach(u => { const s=stats(u);
+      h += `<button class="u ${state.unit===u.id?'on':''} ${viewed[u.id]?'viewed':''}" data-u="${u.id}"><span class="t">${esc(u.title)}</span><span class="m"><span class="dot r-${u.risk}" title="${u.risk} risk"></span>${u.hunks.length} hunk${u.hunks.length>1?'s':''} · <span class="plus">+${s.a}</span> <span class="minus">−${s.d}</span>${failing(u)?'<span class="flag">not done</span>':''}${viewed[u.id]?'<span class="done">✓</span>':''}</span></button>`;
+    });
+    h += `</div>`;
+  });
+  $("#side").innerHTML = h;
+  $("#side").querySelectorAll("[data-u]").forEach(b => b.onclick = () => go(b.dataset.u));
+  $("#side").querySelector("[data-ov]").onclick = e => { e.preventDefault(); go(null) };
+}
+
+ 
+function renderOverview(){
+  const c = {human:0,agent:0,static:0}; units.forEach(u=>c[u.tier]++);
+  const nd = units.reduce((n,u)=>n+(u.checks||[]).filter(x=>x.status==="not_done").length,0);
+  let h = `<span class="tag ${R.verdict==='approve'?'static':'human'}">Overview</span><h1>${esc(R.title)}</h1>`;
+  h += `<p class="eli5">${esc(R.eli5)}</p>`;
+  h += `<div class="stats"><div class="stat"><b>${c.human}</b><span>need your decision</span></div><div class="stat"><b>${c.agent}</b><span>agent reviewed</span></div><div class="stat"><b>${c.static}</b><span>static / CI</span></div><div class="stat"><b style="color:${nd?'var(--bad)':'var(--ok)'}">${nd}</b><span>checks not done</span></div></div>`;
+  h += `<div class="card"><h3>Units</h3>` + units.map(u=>`<div class="urow" data-u="${u.id}"><span class="tag ${u.tier}">${u.tier}</span><span class="dot r-${u.risk}"></span><span class="t">${esc(u.title)}</span>${failing(u)?'<span class="flag">not done</span>':''}</div>`).join("") + `</div>`;
+  h += `<div class="cols">`;
+  h += `<div class="card"><h3>Not checked by anyone</h3>${list(R.not_checked)}</div>`;
+  h += `<div class="card"><h3>Watch after deploy</h3>${list(R.watch_after_deploy)}</div></div>`;
+  if (D.usage && D.usage.model) h += `<p class="kbd" style="margin-top:18px">${esc(D.usage.model)} · ${D.usage.inputTokens.toLocaleString()} in / ${D.usage.outputTokens.toLocaleString()} out${D.usage.costUsd?` · ~$${D.usage.costUsd.toFixed(3)}`:""} · keys: j/k units, 1-4 views</p>`;
+  $("#main").innerHTML = h;
+  $("#main").querySelectorAll("[data-u]").forEach(b => b.onclick = () => go(b.dataset.u));
+}
+function list(a){ return a && a.length ? `<ul class="plain">${a.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>` : `<span class="empty">Nothing listed.</span>` }
+
+ 
+function renderUnit(u){
+  const idx = units.filter(x=>x.tier===u.tier).indexOf(u)+1, tot = units.filter(x=>x.tier===u.tier).length;
+  const s = stats(u);
+  let h = `<span class="tag ${u.tier}">◆ ${TIERS.find(t=>t[0]===u.tier)[1]} · ${idx} of ${tot}</span>`;
+  h += `<h1>${esc(u.title)}</h1>`;
+  h += `<div class="sub"><span><span class="dot r-${u.risk}"></span> ${u.risk} risk — ${esc(u.risk_reason)}</span><span><span class="plus">+${s.a}</span> <span class="minus">−${s.d}</span></span></div>`;
+  h += `<div class="views">` + VIEWS.map(([k,l,n])=>`<button data-v="${k}" class="${state.view===k?'on':''}">${bars(n)}${l}</button>`).join("") + `</div>`;
+  const v = state.view;
+  if (v !== "facts") h += `<p class="brief">${brief(u.brief)}</p>`;
+
+  if (v === "facts") h += facts(u);
+  if (v === "briefed") { h += flowCard(u); h += askCard(u); }
+  if (v === "explained") { h += `<div class="cols">${flowCard(u)}${notesCard(u)}</div>`; }
+  if (v === "guided") { h += flowCard(u) + checksCard(u) + blastCard(u) + askCard(u, true); }
+  if (v === "facts" || v === "explained") h += diffs(u);
+
+  $("#main").innerHTML = h;
+  $("#main").querySelectorAll("[data-v]").forEach(b => b.onclick = () => setView(b.dataset.v));
+  $("#main").querySelectorAll("[data-jump]").forEach(b => b.onclick = () => jump(b.dataset.jump, +b.dataset.line));
+  $("#main").querySelectorAll("[data-copyask]").forEach(b => b.onclick = () => copy(askText(u), "Request copied"));
+  $("#main").querySelectorAll("[data-viewed]").forEach(cb => cb.onchange = () => { viewed[u.id] = cb.checked; store.set("viewed", viewed); renderSide(); renderBar(); });
+}
+
+function facts(u){
+  const files = {}; u.hunks.forEach(id => { const f=FILE_OF[id], hk=HUNKS[id]; if(!f) return; const r = files[f.path] ||= {f, a:0, d:0, n:0, fns:new Set()}; r.a+=hk.adds; r.d+=hk.dels; r.n++; if(hk.header) r.fns.add(hk.header) });
+  let h = `<div class="card"><h3>Files in this unit</h3><table><tr><th>File</th><th>Status</th><th>Hunks</th><th>Lines</th></tr>`;
+  Object.values(files).forEach(r => h += `<tr><td class="mono">${esc(r.f.path)}</td><td>${esc(r.f.status)}</td><td>${r.n}</td><td><span class="plus">+${r.a}</span> <span class="minus">−${r.d}</span></td></tr>`);
+  h += `</table></div>`;
+  const fns = [...new Set(Object.values(files).flatMap(r=>[...r.fns]))];
+  const c = {done:0,not_done:0,no_evidence:0}; (u.checks||[]).forEach(x=>c[x.status]++);
+  h += `<div class="card"><h3>At a glance</h3><dl class="kv"><dt>Tier</dt><dd>${u.tier}</dd><dt>Risk</dt><dd>${u.risk} — ${esc(u.risk_reason)}</dd>`;
+  if (fns.length) h += `<dt>Touches</dt><dd class="mono">${fns.map(esc).join("<br>")}</dd>`;
+  h += `<dt>Checks</dt><dd><span class="st done">${c.done} done</span><span class="st not_done">${c.not_done} not done</span><span class="st no_evidence">${c.no_evidence} no evidence</span></dd></dl></div>`;
+  return h;
+}
+
+function chain(steps){
+  if (!steps || !steps.length) return `<span class="empty">—</span>`;
+  return `<div class="chain">` + steps.map((s,i) => {
+    const tag = s.hunk ? "button" : "span";
+    const attrs = s.hunk ? ` data-jump="${s.hunk}" data-line="${s.line||0}" title="Show ${s.hunk}${s.line?' line '+s.line:''}"` : "";
+    let x = `<${tag} class="step ${s.state}"${attrs}>${esc(s.label)}</${tag}>`;
+    if (i < steps.length-1) x += `<span class="arr">${s.edge?`<em>${esc(s.edge)}</em>`:""}→</span>`;
+    return x;
+  }).join("") + `</div>`;
+}
+function flowCard(u){
+  const f = u.flow||{}; if(!(f.before||[]).length && !(f.after||[]).length) return "";
+  return `<div class="card"><h3>How it changes</h3><div class="flow"><span class="lbl">Before</span>${chain(f.before)}<span class="lbl">After</span>${chain(f.after)}</div></div>`;
+}
+function notesCard(u){
+  if (!(u.notes||[]).length) return `<div class="card"><h3>Go in this unit</h3><span class="empty">No notes.</span></div>`;
+  return `<div class="card"><h3>Go in this unit</h3>` + u.notes.map(n => `<div class="note"><div class="h"><code>${esc(n.code)}</code>${n.hunk?`<button class="ln" data-jump="${n.hunk}" data-line="${n.line}">${n.line} ↓</button>`:""}</div><p>${esc(n.note)}</p></div>`).join("") + `</div>`;
+}
+const ICON = {done:"✓", not_done:"✕", no_evidence:"!"}, STAT = {done:"Done", not_done:"Not done", no_evidence:"No evidence"};
+const EVK = {code:"Source", test:"Test", doc:"Doc", gap:"Gap"};
+function checksCard(u){
+  const id = (META.issues||[]).length ? " · " + META.issues.map(i=>"#"+i).join(" ") : "";
+  if (!(u.checks||[]).length) return "";
+  return `<div class="card"><h3>Done when<span>${esc(id)}</span></h3>` + u.checks.map(c => {
+    const e = c.evidence||{}; const tag = e.hunk ? "button" : "span";
+    const ev = `<${tag} class="ev"${e.hunk?` data-jump="${e.hunk}" data-line="${e.line||0}"`:""}><b>${EVK[e.kind]||e.kind}</b>${esc(e.ref)}</${tag}>`;
+    return `<div class="chk"><span class="ic ${c.status}">${ICON[c.status]}</span><div><span class="c">${esc(c.criterion)}</span><span class="st ${c.status}">${STAT[c.status]}</span><span class="src">from ${esc(c.source)}</span><p>${esc(c.detail)}</p>${ev}</div></div>`;
+  }).join("") + `</div>`;
+}
+function blastCard(u){
+  if (!(u.blast||[]).length) return "";
+  return `<div class="card blast"><h3>Blast radius</h3>` + u.blast.map(b => `<div class="b"><span class="ic no_evidence" style="opacity:.7">!</span><div><b>${esc(b.title)}</b> <span class="src">${b.basis==="inferred"?"inferred":"seen in diff"}</span><p>${esc(b.detail)}</p></div></div>`).join("") + `</div>`;
+}
+function askText(u){ return (u.ask||[]).map((a,i)=>`${i+1}. ${a}`).join("\n") }
+function askCard(u, full){
+  if (!(u.ask||[]).length) return "";
+  const nd = (u.checks||[]).filter(c=>c.status!=="done").length, tot=(u.checks||[]).length;
+  return `<div class="card ask"><h3>Suggested · request changes${full&&tot?`<span>${nd} of ${tot} not done</span>`:""}</h3><ol>${u.ask.map(a=>`<li>${esc(a)}</li>`).join("")}</ol><div style="margin-top:10px"><button class="ev" data-copyask>Copy request</button></div></div>`;
+}
+
+function diffs(u){
+  const marks = {}; const add = (hk, ln, label) => { if(!hk) return; (marks[hk+":"+ln] ||= []).push(label) };
+  (u.notes||[]).forEach(n => add(n.hunk, n.line, "note"));
+  (u.checks||[]).forEach(c => c.evidence && c.evidence.hunk && add(c.evidence.hunk, c.evidence.line, EVK[c.evidence.kind]||"ref"));
+  const byFile = {}; u.hunks.forEach(id => { const f=FILE_OF[id]; if(f) (byFile[f.path] ||= {f, hs:[]}).hs.push(HUNKS[id]) });
+  const n = Object.keys(byFile).length;
+  let h = `<div class="dtool"><span>${n} file${n>1?'s':''} · ${u.hunks.length} hunk${u.hunks.length>1?'s':''}</span><label><input type="checkbox" data-viewed ${viewed[u.id]?'checked':''}> Mark unit viewed</label></div><div class="diffs">`;
+  Object.values(byFile).forEach(({f, hs}) => {
+    h += `<div class="file"><div class="fh"><span>${esc(f.path)}</span><span class="n"><span class="plus">+${hs.reduce((a,x)=>a+x.adds,0)}</span> <span class="minus">−${hs.reduce((a,x)=>a+x.dels,0)}</span></span></div>`;
+    hs.forEach(hk => {
+      h += `<div class="hh">${hk.id} · @@ −${hk.oldStart},${hk.oldLines} +${hk.newStart},${hk.newLines} @@ ${esc(hk.header)}</div><div class="code"><table>`;
+      hk.lines.forEach(l => {
+        const ln = l.kind==="del" ? l.old : l.new;
+        const m = marks[hk.id+":"+ln];
+        h += `<tr class="${l.kind} ${m?'hit':''}" id="L-${hk.id}-${ln}-${l.kind}"><td class="n">${l.old||""}</td><td class="n">${l.new||""}</td><td class="s">${l.kind==="add"?"+":l.kind==="del"?"−":" "}</td><td class="c">${esc(l.text)}${m?[...new Set(m)].map(x=>`<span class="mk">${esc(x)}</span>`).join(""):""}</td></tr>`;
+      });
+      h += `</table></div>`;
+    });
+    h += `</div>`;
+  });
+  return h + `</div>`;
+}
+
+function jump(hunk, line){
+  if (state.view !== "explained" && state.view !== "facts") setView("explained");
+  const sel = [`#L-${hunk}-${line}-add`, `#L-${hunk}-${line}-ctx`, `#L-${hunk}-${line}-del`];
+  let el = null; for (const s of sel){ el = document.querySelector(s); if (el) break; }
+  if (!el) el = document.querySelector(`[id^="L-${hunk}-"]`);
+  if (!el) return;
+  el.scrollIntoView({behavior:"smooth", block:"center"});
+  el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
+}
+
+ 
+function renderBar(){
+  const u = units.find(x=>x.id===state.unit);
+  const ndAll = units.filter(failing).length;
+  const asks = units.flatMap(x => (x.ask||[]).map(a => `- ${x.title}: ${a}`));
+  const target = META.number ? `${META.number}${META.repo?` --repo ${META.repo}`:""}` : "";
+  let info = u ? `Covers ${u.hunks.length} hunk${u.hunks.length>1?'s':''}` : `${units.length} units · ${units.filter(x=>viewed[x.id]).length} viewed`;
+  let h = `<span class="info">◆ ${info}</span>`;
+  if (u) h += `<button data-a="viewed">${viewed[u.id]?"Viewed ✓":"Mark viewed"}</button>`;
+  h += `<button data-a="changes" class="${ndAll?'pri':''}">Request changes</button>`;
+  h += `<button data-a="approve" class="${ndAll?'':'pri'}">Approve</button>`;
+  $("#bar").innerHTML = h;
+  $("#bar").querySelectorAll("[data-a]").forEach(b => b.onclick = () => {
+    const a = b.dataset.a;
+    if (a === "viewed") { viewed[u.id] = !viewed[u.id]; store.set("viewed", viewed); renderSide(); renderBar(); if (viewed[u.id]) next(1); return; }
+    if (!target) { toast("Local review: no PR to post to"); return; }
+    if (a === "approve") copy(`gh pr review ${target} --approve`, "Approve command copied — run it in your terminal");
+    else copy(`gh pr review ${target} --request-changes --body ${shq(asks.length ? asks.join("\n") : "See review notes.")}`, "Request-changes command copied");
+  });
+}
+function shq(s){ return "'" + s.replace(/'/g, "'\\''") + "'" }
+
+ 
+function setView(v){ state.view = v; store.set("view", v); render() }
+function go(id){ state.unit = id; document.body.classList.remove("nav"); location.hash = id ? id : ""; render(); window.scrollTo(0,0) }
+function next(d){ const ids=[null, ...units.map(u=>u.id)]; let i=ids.indexOf(state.unit)+d; if(i<0) i=0; if(i>=ids.length) i=ids.length-1; go(ids[i]) }
+function render(){ renderSide(); const u = units.find(x=>x.id===state.unit); u ? renderUnit(u) : renderOverview(); renderBar() }
+document.addEventListener("keydown", e => {
+  if (e.target.matches("input,textarea") || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key==="j") next(1); else if (e.key==="k") next(-1);
+  else if (state.unit && "1234".includes(e.key)) setView(VIEWS[+e.key-1][0]);
+});
+window.addEventListener("hashchange", () => { const id = location.hash.slice(1)||null; if (id !== state.unit){ state.unit = units.some(u=>u.id===id) ? id : null; render() } });
+const h0 = location.hash.slice(1); if (units.some(u=>u.id===h0)) state.unit = h0;
+render();
+})();
+</script>
+</body>
+</html>
