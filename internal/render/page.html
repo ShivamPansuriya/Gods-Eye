@@ -207,7 +207,7 @@ button.st:hover{border-color:var(--iris)}
 .chk p{margin:2px 0 6px;color:var(--muted);font-size:14px}
 .ev{display:inline-flex;gap:6px;align-items:center;font-size:12px;border:1px solid var(--line);border-radius:6px;padding:2px 8px;background:var(--bg)}
 button.ev:hover{border-color:var(--iris)}
-.ev b{font-weight:600;font-family:var(--mono);font-size:11px}
+.ev b{font-weight:600;font-family:var(--mono);font-size:11px;white-space:nowrap}
 .src{font-size:11.5px;color:var(--faint);margin-left:6px}
 .bl{display:grid;grid-template-columns:22px minmax(0,1fr);gap:2px 10px;padding:8px 0}
 .bl p{margin:2px 0 0;color:var(--muted);font-size:14px}
@@ -262,8 +262,25 @@ th{font-weight:600;color:var(--muted);font-size:12px;border-top:0}
 .code tr.flash td{animation:fl 1.6s ease-out}
 @keyframes fl{0%{box-shadow:inset 0 0 0 9999px color-mix(in srgb,var(--hl) 55%,transparent)}100%{box-shadow:inset 0 0 0 9999px transparent}}
 .code td.c{width:100%}
-.mk{display:inline-block;font-family:var(--sans);font-size:10.5px;color:var(--iris);border:1px solid var(--iris);border-radius:4px;padding:0 4px;line-height:15px;margin-left:12px;white-space:nowrap}
-.mk.bugmk{color:var(--bad);border-color:var(--bad)}
+.mk{display:inline-flex;align-items:center;gap:3px;font:500 11px/16px var(--sans);color:var(--iris);background:var(--panel);border:1px solid var(--iris);border-radius:5px;padding:0 6px;margin-left:12px;white-space:nowrap;cursor:pointer;vertical-align:1px}
+.mk:hover,.mk[aria-expanded="true"]{background:var(--iris);color:var(--iris-ink)}
+.mk.bugmk{color:var(--bad);border-color:var(--bad)} .mk.bugmk:hover,.mk.bugmk[aria-expanded="true"]{background:var(--bad);color:var(--panel)}
+.mk.chkmk.done{color:var(--ok);border-color:var(--ok)} .mk.chkmk.done:hover,.mk.chkmk.done[aria-expanded="true"]{background:var(--ok);color:var(--panel)}
+.mk.chkmk.not_done{color:var(--bad);border-color:var(--bad)} .mk.chkmk.not_done:hover,.mk.chkmk.not_done[aria-expanded="true"]{background:var(--bad);color:var(--panel)}
+.mk.chkmk.no_evidence{color:var(--warn);border-color:var(--warn)} .mk.chkmk.no_evidence:hover,.mk.chkmk.no_evidence[aria-expanded="true"]{background:var(--warn);color:var(--panel)}
+.code tr.ann td{padding:0;background:var(--side);white-space:normal;font-family:var(--sans);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.annbox{position:sticky;left:0;width:min(780px,calc(100vw - 64px));padding:10px 14px 12px 64px;font-size:14px;line-height:1.5}
+.annbox .anh{display:flex;gap:8px;align-items:center;margin-bottom:4px}
+.annbox .anh .close{margin-left:auto;background:none;border:0;color:var(--faint);font-size:16px;line-height:1;padding:2px 6px;border-radius:5px}
+.annbox .anh .close:hover{background:var(--hover);color:var(--ink)}
+.annbox .bug{padding:0;border:0}
+.annbox .chk{padding:0;border:0}
+.annbox p{margin:2px 0 0;color:var(--muted)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;font-size:12.5px;color:var(--muted)}
+.legend .mk{margin-left:0;cursor:default}
+.legend .mk:hover{background:var(--panel);color:var(--iris)}
+.legend .mk.bugmk:hover{color:var(--bad)} .legend .mk.chkmk.done:hover{color:var(--ok)}
+.linkbtn{background:none;border:0;color:var(--iris);padding:0;font-size:12.5px;text-decoration:underline;text-underline-offset:2px}
 
 /* summary */
 .verdict{display:flex;gap:18px;align-items:center;flex-wrap:wrap}
@@ -295,6 +312,7 @@ th{font-weight:600;color:var(--muted);font-size:12px;border-top:0}
   .crumbs .hide-sm{display:none}
   .start{grid-template-columns:minmax(0,1fr);justify-items:start}
   .bar .info,.bar .lab{display:none}
+  .annbox{padding:10px 12px 12px 12px;width:calc(100vw - 34px)}
 }
 @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 </style>
@@ -541,11 +559,12 @@ const ICON = {done:"✓", not_done:"✕", no_evidence:"!"}, STAT = {done:"Done",
 function checksCard(u){
   if (!(u.checks||[]).length) return "";
   const id = (META.issues||[]).length ? META.issues.map(i=>"#"+i).join(" ") : "";
-  return `<div class="card"><h3>Done when<span>${esc(id)}</span></h3>` + u.checks.map(c => {
-    const e = c.evidence||{}; const tag = e.hunk ? "button" : "span";
-    const ev = `<${tag} class="ev"${e.hunk?` data-jump="${e.hunk}" data-line="${e.line||0}"`:""}><b>${EVK[e.kind]||e.kind}</b>${esc(e.ref)}</${tag}>`;
-    return `<div class="chk"><span class="ic ${c.status}">${ICON[c.status]}</span><div><span class="c">${esc(c.criterion)}</span><span class="stt ${c.status}">${STAT[c.status]}</span><span class="src">from ${esc(c.source)}${c.finding?` · verified as ${esc(c.finding)}`:""}${c.disputed?" · disputed by verifiers":""}</span><p>${esc(c.detail)}</p>${ev}</div></div>`;
-  }).join("") + `</div>`;
+  return `<div class="card"><h3>Done when<span>${esc(id)}</span></h3>` + u.checks.map(c => checkRow(c, true)).join("") + `</div>`;
+}
+function checkRow(c, withEvidence){
+  const e = c.evidence||{}; const tag = e.hunk ? "button" : "span";
+  const ev = withEvidence ? `<${tag} class="ev"${e.hunk?` data-jump="${e.hunk}" data-line="${e.line||0}"`:""}><b>${EVK[e.kind]||e.kind}</b>${esc(e.ref)}</${tag}>` : "";
+  return `<div class="chk"><span class="ic ${c.status}">${ICON[c.status]}</span><div><span class="c">${esc(c.criterion)}</span><span class="stt ${c.status}">${STAT[c.status]}</span><span class="src">from ${esc(c.source)}${c.finding?` · verified as ${esc(c.finding)}`:""}${c.disputed?" · disputed by verifiers":""}</span><p>${esc(c.detail)}</p>${ev}</div></div>`;
 }
 function blastCard(u){
   if (!(u.blast||[]).length) return "";
@@ -556,21 +575,36 @@ function askCard(u, full){
   if (!(u.ask||[]).length) return "";
   return `<div class="card askc"><h3>Suggested changes${full?`<span>${u.ask.length}</span>`:""}</h3><ol>${u.ask.map(a=>`<li>${esc(a)}</li>`).join("")}</ol></div>`;
 }
+const SRC = {pr:"the PR description", issue:"the linked issue", guidance:"the repo's review guidance", inferred:"the reviewer's reading of the code"};
 function diffs(u){
-  const marks = {}; const add = (hk, ln, label) => { if(!hk) return; (marks[hk+":"+ln] ||= []).push(label) };
-  bugsOf(u).forEach(f => add(f.hunk, f.line, "bug "+f.id));
-  (u.notes||[]).forEach(n => add(n.hunk, n.line, "note"));
-  (u.checks||[]).forEach(c => c.evidence && c.evidence.hunk && add(c.evidence.hunk, c.evidence.line, EVK[c.evidence.kind]||"ref"));
+  // Every marker on a line explains itself: hover for a preview, click to open it under the line.
+  const marks = {}; let seq = 0;
+  const add = (hk, ln, m) => { if(!hk) return; m.id = "a"+(++seq); (marks[hk+":"+ln] ||= []).push(m) };
+  bugsOf(u).forEach(f => add(f.hunk, f.line, {cls:"bugmk", label:`bug ${f.id}`, tip:`Verified bug: ${f.title}`, open:true,
+    head:`<span class="lbl">Verified bug on this line</span>`, body: bugRow(f)}));
+  (u.notes||[]).forEach(n => add(n.hunk, n.line, {cls:"notemk", label:"note", tip:n.note,
+    head:`<span class="lbl">Why this line matters</span>`, body:`<p style="color:var(--ink)">${esc(n.note)}</p>`}));
+  (u.checks||[]).forEach(c => { const e = c.evidence; if (!e || !e.hunk) return;
+    add(e.hunk, e.line, {cls:"chkmk "+c.status, label:`check ${ICON[c.status]}`, tip:`${STAT[c.status]}: ${c.criterion}`,
+      head:`<span class="lbl">Evidence for a done-when check</span><span class="src">criterion from ${esc(SRC[c.source]||c.source)}</span>`,
+      body: checkRow(c, false) + (e.ref?`<p>Evidence: ${esc(EVK[e.kind]||e.kind)}, ${esc(e.ref)}</p>`:"")}); });
   const byFile = {}; u.hunks.forEach(id => { const f=FILE_OF[id]; if(f) (byFile[f.path] ||= {f, hs:[]}).hs.push(HUNKS[id]) });
-  const n = Object.keys(byFile).length;
-  let h = `<div class="dtool"><span>${n} file${n>1?"s":""} · ${u.hunks.length} hunk${u.hunks.length>1?"s":""}</span></div>`;
+  const n = Object.keys(byFile).length, nMarks = Object.values(marks).reduce((a,x)=>a+x.length,0);
+  let h = `<div class="dtool"><span>${n} file${n>1?"s":""} · ${u.hunks.length} hunk${u.hunks.length>1?"s":""}</span>${nMarks?`<button class="linkbtn" data-annall>Open all ${nMarks} explanations</button>`:""}</div>`;
+  if (nMarks) h += `<div class="legend" style="margin:-4px 0 12px"><span>Markers on lines:</span><span class="mk notemk">note</span><span>why the line matters</span><span class="mk bugmk">bug</span><span>a verified bug</span><span class="mk chkmk done">check ✓</span><span>proof for a done-when check</span><span>· hover to preview, click to read</span></div>`;
   Object.values(byFile).forEach(({f, hs}) => {
     h += `<div class="file"><div class="fh"><span>${esc(f.path)}</span><span><span class="plus">+${hs.reduce((a,x)=>a+x.adds,0)}</span> <span class="minus">−${hs.reduce((a,x)=>a+x.dels,0)}</span></span></div>`;
     hs.forEach(hk => {
       h += `<div class="hh">${hk.id} · @@ −${hk.oldStart},${hk.oldLines} +${hk.newStart},${hk.newLines} @@ ${esc(hk.header)}</div><div class="code"><table>`;
+      const newNums = new Set(hk.lines.filter(x=>x.kind!=="del").map(x=>x.new));
       hk.lines.forEach(l => {
-        const ln = l.kind==="del" ? l.old : l.new, m = marks[hk.id+":"+ln];
-        h += `<tr class="${l.kind} ${m?"hit":""}" id="L-${hk.id}-${ln}-${l.kind}"><td class="n">${l.old||""}</td><td class="n">${l.new||""}</td><td class="s">${l.kind==="add"?"+":l.kind==="del"?"−":" "}</td><td class="c">${esc(l.text)}${m?[...new Set(m)].map(x=>`<span class="mk${x.startsWith("bug ")?" bugmk":""}">${esc(x)}</span>`).join(""):""}</td></tr>`;
+        const ln = l.kind==="del" ? l.old : l.new;
+        const ms = (l.kind==="del" && newNums.has(ln)) ? null : marks[hk.id+":"+ln];
+        h += `<tr class="${l.kind} ${ms?"hit":""}" id="L-${hk.id}-${ln}-${l.kind}"><td class="n">${l.old||""}</td><td class="n">${l.new||""}</td><td class="s">${l.kind==="add"?"+":l.kind==="del"?"−":" "}</td><td class="c">${esc(l.text)}${ms?ms.map(m=>`<button class="mk ${m.cls}" data-ann="${m.id}" title="${esc(m.tip)}" aria-expanded="${m.open?"true":"false"}" aria-controls="A-${m.id}">${esc(m.label)}</button>`).join(""):""}</td></tr>`;
+        if (ms) {
+          ms.forEach(m => { h += `<tr class="ann" id="A-${m.id}" data-for="${hk.id}:${ln}" ${m.open?"":"hidden"}><td colspan="4"><div class="annbox"><div class="anh">${m.head}<button class="close" data-ann="${m.id}" aria-label="Close">×</button></div>${m.body}</div></td></tr>`; });
+          delete marks[hk.id+":"+ln]; // a line shown twice (e.g. context) gets its markers once
+        }
       });
       h += `</table></div>`;
     });
@@ -578,11 +612,18 @@ function diffs(u){
   });
   return h;
 }
+function toggleAnn(id, force){
+  const row = document.getElementById("A-"+id); if (!row) return;
+  const open = force !== undefined ? force : row.hidden;
+  row.hidden = !open;
+  document.querySelectorAll(`.mk[data-ann="${id}"]`).forEach(b => b.setAttribute("aria-expanded", open ? "true" : "false"));
+}
 function jump(hunk, line){
   if (view !== "explained" && view !== "facts") { view = "explained"; store.set("view", view); render(); }
   let el = null; for (const k of ["add","ctx","del"]) { el = document.getElementById(`L-${hunk}-${line}-${k}`); if (el) break; }
   if (!el) el = document.querySelector(`[id^="L-${hunk}-"]`);
   if (!el) return;
+  document.querySelectorAll(`tr.ann[data-for="${hunk}:${line}"]`).forEach(r => toggleAnn(r.id.slice(2), true));
   el.scrollIntoView({behavior:"smooth", block:"center"});
   el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
 }
@@ -693,6 +734,9 @@ function wire(){
     if (unit && route !== unit) { go(unit); view = "explained"; store.set("view", view); render(); }
     setTimeout(()=>jump(b.dataset.jump, +b.dataset.line), 30);
   });
+  m.querySelectorAll("[data-ann]").forEach(b => b.onclick = e => { e.stopPropagation(); toggleAnn(b.dataset.ann) });
+  const all = m.querySelector("[data-annall]");
+  if (all) all.onclick = () => { const rows = [...m.querySelectorAll("tr.ann")]; const open = rows.some(r => r.hidden); rows.forEach(r => toggleAnn(r.id.slice(2), open)); all.textContent = open ? "Close all explanations" : `Open all ${rows.length} explanations`; };
   m.querySelectorAll("[data-agree]").forEach(b => b.onclick = () => {
     const id = b.dataset.agree; agree[id] = agree[id]===b.dataset.v ? "" : b.dataset.v; store.set("agree", agree);
     b.parentElement.querySelectorAll("button").forEach(x => x.classList.toggle("on", agree[id]===x.dataset.v));
