@@ -14,8 +14,10 @@ type Review struct {
 	WatchAfterDeploy []string `json:"watch_after_deploy"`
 
 	// Filled by the pipeline, not the model.
-	Findings []Finding `json:"findings,omitempty"`
-	Pipeline *Pipeline `json:"pipeline,omitempty"`
+	Findings    []Finding    `json:"findings,omitempty"`
+	Design      *Design      `json:"design,omitempty"`
+	Attribution *Attribution `json:"attribution,omitempty"`
+	Pipeline    *Pipeline    `json:"pipeline,omitempty"`
 }
 
 // Story explains the PR as a whole, before any unit.
@@ -40,21 +42,31 @@ type Impact struct {
 
 // Unit is one behaviour change, made of one or more hunks.
 type Unit struct {
-	ID         string     `json:"id"`
-	Title      string     `json:"title"`
-	Hunks      []string   `json:"hunks"`
-	Tier       string     `json:"tier"` // human | agent | static
-	Risk       string     `json:"risk"` // low | medium | high
-	RiskReason string     `json:"risk_reason"`
-	Brief      string     `json:"brief"`    // wrap key claims in [[double brackets]]
-	Question   string     `json:"question"` // the one decision the reviewer must make here
-	Flow       Flow       `json:"flow"`
-	Notes      []LineNote `json:"notes"`
-	Checks     []Check    `json:"checks"`
-	Blast      []Blast    `json:"blast"`
-	Ask        []string   `json:"ask"`
+	ID         string       `json:"id"`
+	Title      string       `json:"title"`
+	Hunks      []string     `json:"hunks"`
+	Tier       string       `json:"tier"` // human | agent | static
+	Risk       string       `json:"risk"` // low | medium | high
+	RiskReason string       `json:"risk_reason"`
+	Brief      string       `json:"brief"`       // wrap key claims in [[double brackets]]
+	Question   string       `json:"question"`    // the one decision the reviewer must make here
+	ChangeType string       `json:"change_type"` // bug_fix | feature | ui | performance | api | refactor | data | config | docs | test
+	Evidence   UnitEvidence `json:"evidence"`
+	Flow       Flow         `json:"flow"`
+	Notes      []LineNote   `json:"notes"`
+	Checks     []Check      `json:"checks"`
+	Blast      []Blast      `json:"blast"`
+	Ask        []string     `json:"ask"`
 
 	Findings []string `json:"findings,omitempty"` // ids of confirmed findings in this unit
+}
+
+// UnitEvidence is whether the PR proves this unit works, using the evidence its
+// kind of change needs ("trust me" vs "check this").
+type UnitEvidence struct {
+	Status string `json:"status"` // provided | partial | missing
+	Have   string `json:"have"`   // what proof exists (tests in the diff, output in the description)
+	Ask    string `json:"ask"`    // the exact proof to ask the author for
 }
 
 // Flow is a before/after chain of short steps.
@@ -177,6 +189,7 @@ type Pipeline struct {
 	Usage        map[string]StageUsage `json:"usage"`
 	CostUSD      float64               `json:"costUsd"`
 	Notice       string                `json:"notice,omitempty"`
+	DesignStats  *DesignStats          `json:"designStats,omitempty"`
 	Errors       []string              `json:"errors,omitempty"`
 }
 

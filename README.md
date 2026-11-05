@@ -32,7 +32,8 @@ No style comments or "consider…" suggestions. Severity is decided by the voter
 ```
 gh / git ──► diff (H1..Hn) ──► caller index (git grep for every changed symbol)
                  │
-                 ├──► mapper ─────────────► units, tiers, flows, checks
+                 ├──► mapper ─────────────► story, units, tiers, checks, proof per unit
+                 ├──► architect ──────────► architecture, code flows, practices, existing-design problems
                  ├──► hunter × N slices ──► candidate bugs (quote + scenario)
                  │                               │
                  │          drop invented quotes, merge duplicates
@@ -73,10 +74,14 @@ It writes a single HTML file to `.godseye/pr-123.html` and opens it.
 
 ## Reviewing on the page
 
+0. The page has five parts: **Story → How it's built → the units → Is the existing design right? → Summary**.
 1. **The story of the PR** comes first: why it exists (from the description, or inferred from code and marked as such), what it changes overall, before → after, who it affects, and where your judgement matters.
-2. **Your review path** walks the units in priority order. Each step asks you **one question** ("Should existing Table exports default to STACKED?"). Answer with **Looks right** (`a`), **Needs change** (`c`) or **Ask author** (`q`) and the page moves to the next step.
-3. **Verified bugs** in a unit need your call: **Agree** puts them in your review, **Not a bug** overrules the AI. A step with an undecided bug won't let you mark it "Looks right" until you decide.
-4. **Summary** turns your decisions into a review: a verdict (it can't be Approve while a verified bug is undecided), a "Must fix" list, questions, and what looks right. Edit it, then copy the text or the `gh pr review` command.
+2. **How it's built** draws the change: an **architecture map** (components by layer, new / changed / removed, before / after, hover to trace, click for files and UML members) and **code flows** you can play step by step ("after this, this happens"), each step linked to its line of code.
+3. **Your review path** walks the units in priority order. Each step asks you **one question** ("Should existing Table exports default to STACKED?"). Answer with **Looks right** (`a`), **Needs change** (`c`) or **Ask author** (`q`) and the page moves to the next step.
+4. **Proof:** each unit is checked for the evidence its kind of change needs (a bug fix needs the same input on old and new code; a UI change needs before/after; performance needs measurements). Missing proof becomes a concrete ask you can send with one click.
+5. **Verified bugs** in a unit need your call: **Agree** puts them in your review, **Not a bug** overrules the AI. A step with an undecided bug won't let you mark it "Looks right" until you decide.
+6. **Is the existing design right?** looks past the diff at the code the PR builds on: problems in it (verified by the same 3-voter check), how to fix the old code, and whether to bring the fix into this PR or a follow-up. It also checks the PR against the repo's own practices (CLAUDE.md, AGENTS.md, coding standards, and how existing code does the same thing). You decide: fix in this PR, follow-up issue, or not a problem.
+7. **Summary** turns your decisions into a review: a verdict (it can't be Approve while a verified bug is undecided), a "Must fix" list, questions, and what looks right. Edit it, then copy the text or the `gh pr review` command. It also drafts an evidence-first **PR description** for the author: who did what (agent-written PRs are detected from commit trailers), the problem, proof per change, limits, and an ELI5.
 
 Progress is kept in your browser per PR and commit. Keys: `j` / `k` move, `1`-`4` switch views, `s` summary.
 

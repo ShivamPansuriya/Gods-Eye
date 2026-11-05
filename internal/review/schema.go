@@ -73,7 +73,7 @@ const mapSchemaJSON = `{
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id","title","hunks","tier","risk","risk_reason","brief","question","flow","notes","checks","blast","ask"],
+        "required": ["id","title","hunks","tier","risk","risk_reason","brief","question","change_type","evidence","flow","notes","checks","blast","ask"],
         "properties": {
           "id":          {"type": "string"},
           "title":       {"type": "string"},
@@ -83,6 +83,17 @@ const mapSchemaJSON = `{
           "risk_reason": {"type": "string"},
           "brief":       {"type": "string"},
           "question":    {"type": "string"},
+          "change_type": {"type": "string", "enum": ["bug_fix","feature","ui","performance","api","refactor","data","config","docs","test"]},
+          "evidence": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["status","have","ask"],
+            "properties": {
+              "status": {"type": "string", "enum": ["provided","partial","missing"]},
+              "have":   {"type": "string"},
+              "ask":    {"type": "string"}
+            }
+          },
           "flow": {
             "type": "object",
             "additionalProperties": false,

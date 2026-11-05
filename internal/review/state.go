@@ -11,11 +11,13 @@ import (
 // State is what a review remembers between rounds, so the next round reviews
 // only what changed, skips what was already reported, and notices fixes.
 type State struct {
-	Key      string    `json:"key"`
-	Round    int       `json:"round"`
-	HeadSHA  string    `json:"headSha"`
-	Findings []Finding `json:"findings"`
-	SavedAt  time.Time `json:"savedAt"`
+	Key         string       `json:"key"`
+	Round       int          `json:"round"`
+	HeadSHA     string       `json:"headSha"`
+	Findings    []Finding    `json:"findings"`
+	Practices   []Practice   `json:"practices,omitempty"`
+	Foundations []Foundation `json:"foundations,omitempty"`
+	SavedAt     time.Time    `json:"savedAt"`
 }
 
 var keyClean = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
@@ -48,6 +50,18 @@ func SaveState(dir, key, head string, r *Review) error {
 	for _, f := range r.Findings {
 		if f.Status == "confirmed" {
 			s.Findings = append(s.Findings, f)
+		}
+	}
+	if r.Design != nil {
+		for _, f := range r.Design.Foundations.Items {
+			if f.Status == "confirmed" {
+				s.Foundations = append(s.Foundations, f)
+			}
+		}
+		for _, pr := range r.Design.Practices {
+			if pr.Status != "followed" && pr.State == "open" {
+				s.Practices = append(s.Practices, pr)
+			}
 		}
 	}
 	p := StatePath(dir, key)

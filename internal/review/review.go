@@ -51,6 +51,8 @@ func Finalize(r *Review, d *diff.Diff, rules []risk.Rule) {
 		u.Title = clampWords(u.Title, 10)
 		u.Brief = clampWords(u.Brief, 45)
 		u.Question = clampWords(u.Question, 26)
+		u.Evidence.Have, u.Evidence.Ask = clampWords(u.Evidence.Have, 26), clampWords(u.Evidence.Ask, 36)
+		u.Evidence.Status = oneOf(u.Evidence.Status, "missing", "provided", "partial", "missing")
 		u.RiskReason = clampWords(u.RiskReason, 16)
 		for j := range u.Notes {
 			u.Notes[j].Note = clampWords(u.Notes[j].Note, 26)

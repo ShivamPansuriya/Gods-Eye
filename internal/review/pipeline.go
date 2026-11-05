@@ -101,7 +101,8 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 	tools := append(agent.ReadTools(),
 		agent.Tool{Name: "submit_review", Description: "Submit the structured review map. Ends the mapping task.", Schema: MapSchema(), Submit: true},
 		agent.Tool{Name: "submit_findings", Description: "Submit the bugs you found (possibly none). Ends the hunting task.", Schema: FindingsSchema(), Submit: true, Strict: true},
-		agent.Tool{Name: "submit_verdict", Description: "Submit your verdict on one reported bug. Ends the verification task.", Schema: VerdictSchema(), Submit: true, Strict: true},
+		agent.Tool{Name: "submit_verdict", Description: "Submit your verdict on one reported bug or design claim. Ends the verification task.", Schema: VerdictSchema(), Submit: true, Strict: true},
+		agent.Tool{Name: "submit_design", Description: "Submit the architecture, code flows, practices and foundations. Ends the architect task.", Schema: DesignSchema(), Submit: true},
 	)
 	meter := agent.NewMeter()
 	runner := &agent.Runner{
@@ -115,6 +116,8 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 		mapRes *Review
 		mapErr error
 		wg     sync.WaitGroup
+		mu     sync.Mutex
+		errs   []string
 	)
 	started := make(chan struct{})
 	wg.Add(1)
@@ -135,11 +138,43 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 	}()
 	<-started
 
+	// 4b. Architect: architecture, step-by-step flows, practices, existing-design check.
+	// It reads the same whole-PR block as the mapper, so its prefix is a cache read.
+	var design *Design
+	if opt.Depth != "quick" {
+		var knownDesign []string
+		if opt.Prev != nil {
+			for _, f := range opt.Prev.Foundations {
+				knownDesign = append(knownDesign, fmt.Sprintf("%s (%s:%d)", f.Title, f.File, f.Line))
+			}
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			raw, err := runner.Run(ctx, agent.Task{Stage: "design", Label: "design", Context: diffBlock(annotated, "whole PR"),
+				Prompt: designTaskWith(knownDesign), Submit: "submit_design", MaxTurns: 18})
+			if err != nil {
+				mu.Lock()
+				errs = append(errs, err.Error())
+				mu.Unlock()
+				return
+			}
+			var ds Design
+			if err := json.Unmarshal(raw, &ds); err != nil {
+				mu.Lock()
+				errs = append(errs, "design: "+err.Error())
+				mu.Unlock()
+				return
+			}
+			design = &ds
+			log(fmt.Sprintf("Design: %d components, %d flows, %d practices, %d foundation claims",
+				len(ds.Architecture.Components), len(ds.Flows), len(ds.Practices), len(ds.Foundations.Items)))
+		}()
+	}
+
 	// 5. Hunters, in parallel, over slices of the diff.
 	var (
-		mu        sync.Mutex
 		cands     []Finding
-		errs      []string
 		lenses    = []Lens{LensAll}
 		known     []string
 		huntSlcs  [][]string
@@ -239,14 +274,27 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 		kept[i].ID = fmt.Sprintf("F%d", i+1)
 	}
 
+	// 7b. Ground the design: every cited line must exist; carry earlier rounds.
+	if design != nil {
+		st := GroundDesign(design, d, ws, pipe.Round)
+		pipe.DesignStats = &st
+		if pipe.Round > 1 {
+			CarryDesign(design, opt.Prev, ws)
+		}
+	}
+
 	// 8. Independent verification by vote.
 	voters := 0
 	if opt.Depth != "quick" {
 		voters = len(VerifyLenses)
 	}
 	pipe.Voters = voters
-	if voters > 0 && len(kept) > 0 {
-		log(fmt.Sprintf("Verifying %d findings with %d independent voters each", len(kept), voters))
+	nDesign := 0
+	if design != nil {
+		nDesign = len(design.Foundations.Items)
+	}
+	if voters > 0 && len(kept)+nDesign > 0 {
+		log(fmt.Sprintf("Verifying %d findings and %d design claims with %d independent voters each", len(kept), nDesign, voters))
 		sort.SliceStable(kept, func(a, b int) bool { return confRank(kept[a].Confidence) > confRank(kept[b].Confidence) })
 		var vwg sync.WaitGroup
 		for i := range kept {
@@ -259,7 +307,7 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 				go func(f *Finding, l Lens) {
 					defer vwg.Done()
 					raw, err := runner.Run(ctx, agent.Task{Stage: "verify", Label: "verify-" + f.ID + "-" + l.Name,
-						Prompt: verifyTask(l, *f, hunkText(byID[f.Hunk])), Submit: "submit_verdict", MaxTurns: 7, Effort: opt.VerifyEff})
+						Prompt: verifyTask(l, *f, hunkText(byID[f.Hunk])), Submit: "submit_verdict", MaxTurns: 6, Effort: opt.VerifyEff})
 					mu.Lock()
 					defer mu.Unlock()
 					if err != nil {
@@ -276,7 +324,44 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 				}(&kept[i], l)
 			}
 		}
+		// Claims about the existing design go through the same vote.
+		if design != nil {
+			for i := range design.Foundations.Items {
+				f := &design.Foundations.Items[i]
+				if f.Status == "confirmed" || f.Status == "resolved" {
+					continue // carried from an earlier round
+				}
+				if meter.Total().CostUSD > opt.Budget {
+					f.Status, f.Why = "skipped", fmt.Sprintf("budget of $%.0f reached", opt.Budget)
+					continue
+				}
+				for _, l := range VerifyLenses[:voters] {
+					vwg.Add(1)
+					go func(f *Foundation, l Lens) {
+						defer vwg.Done()
+						raw, err := runner.Run(ctx, agent.Task{Stage: "verify", Label: "verify-" + f.ID + "-" + l.Name,
+							Prompt: verifyFoundationTask(l, *f), Submit: "submit_verdict", MaxTurns: 6, Effort: opt.VerifyEff})
+						mu.Lock()
+						defer mu.Unlock()
+						if err != nil {
+							errs = append(errs, err.Error())
+							return
+						}
+						var v Vote
+						if json.Unmarshal(raw, &v) == nil {
+							v.Lens = l.Name
+							f.Votes = append(f.Votes, v)
+						}
+					}(f, l)
+				}
+			}
+		}
 		vwg.Wait()
+	}
+	if design != nil {
+		for i := range design.Foundations.Items {
+			TallyFoundation(&design.Foundations.Items[i], voters)
+		}
 	}
 	for i := range kept {
 		tally(&kept[i], voters)
@@ -286,6 +371,10 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 	Finalize(r, d, rules)
 	all := append(kept, carriedOpen(carried, len(kept))...)
 	Merge(r, d, all)
+	r.Design = design
+	AttachDesignUnits(r)
+	att := DetectAttribution(in.Body + "\n" + strings.Join(in.Commits, "\n"))
+	r.Attribution = &att
 	for _, f := range r.Findings {
 		switch f.Status {
 		case "confirmed":

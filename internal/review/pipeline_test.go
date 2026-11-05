@@ -135,3 +135,75 @@ func TestMergeDrivesTierVerdictAndChecks(t *testing.T) {
 		t.Fatalf("disputed check = %+v verdict %s", c, r2.Verdict)
 	}
 }
+
+func TestGroundDesignDropsInventedClaimsAndCleansDiagram(t *testing.T) {
+	d := exampleDiff(t)
+	ds := &Design{
+		Architecture: Architecture{
+			Components: []Component{
+				{ID: "Writer", Name: "Writer", Layer: "data", Kind: "changed", Files: []string{"internal/index/writer.go", "nope.go"}},
+				{ID: "writer", Name: "dup"},
+				{ID: "sync", Name: "Syncer", Layer: "weird", Kind: "same"},
+			},
+			Links: []Link{{From: "sync", To: "writer", Label: "calls Commit"}, {From: "sync", To: "ghost"}},
+		},
+		Flows: []CodeFlow{{Title: "Busy write", Lanes: []Lane{{ID: "sync", Name: "Syncer"}}, Steps: []FlowStep{
+			{From: "sync", To: "writer", Action: "Commit", File: "internal/index/writer.go", Quote: "time.Sleep(backoff(attempt))", Kind: "added"},
+			{From: "writer", To: "db", Action: "made up", File: "internal/index/writer.go", Quote: "db.Explode()"},
+		}}},
+		Practices: []Practice{
+			{Practice: "Errors are wrapped", Status: "broken", File: "internal/index/writer.go", Quote: "return ErrIndexBusy"},
+			{Practice: "Invented", Status: "broken", File: "internal/index/writer.go", Quote: "panic(\"x\")"},
+		},
+		Foundations: Foundations{Verdict: "bogus", Items: []Foundation{
+			{Title: "Real", File: "internal/index/writer.go", Quote: "time.Sleep(backoff(attempt))", Adopt: "now"},
+			{Title: "Invented", File: "internal/index/writer.go", Quote: "go func() { leak() }()"},
+		}},
+	}
+	st := GroundDesign(ds, d, nil, 1)
+	a := ds.Architecture
+	if len(a.Components) != 2 || len(a.Components[0].Files) != 1 || a.Components[1].Layer != "service" {
+		t.Fatalf("components = %+v", a.Components)
+	}
+	if len(a.Links) != 1 {
+		t.Fatalf("links = %+v", a.Links)
+	}
+	f := ds.Flows[0]
+	if !f.Steps[0].Grounded || f.Steps[0].Line != 29 || f.Steps[0].Hunk != "H2" || f.Steps[1].Grounded || len(f.Lanes) != 3 {
+		t.Fatalf("flow = %+v", f)
+	}
+	if st.PracticesKept != 1 || st.PracticesDrop != 1 || st.FoundationsKept != 1 || st.FoundationsDrop != 1 {
+		t.Fatalf("stats = %+v", st)
+	}
+	if ds.Foundations.Verdict != "questionable" || ds.Foundations.Items[0].ID != "D1" || ds.Practices[0].ID != "P1" {
+		t.Fatalf("ids/verdict = %+v", ds.Foundations)
+	}
+}
+
+func TestDetectAttribution(t *testing.T) {
+	a := DetectAttribution("feat: x\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>")
+	if !a.Agent || a.Tool != "claude" || a.Reviewed != "unknown" {
+		t.Fatalf("got %+v", a)
+	}
+	b := DetectAttribution("Written by an AI agent on behalf of @x, who has not reviewed it yet.")
+	if !b.Agent || b.Reviewed != "no" {
+		t.Fatalf("got %+v", b)
+	}
+	if c := DetectAttribution("plain human commit"); c.Agent {
+		t.Fatalf("got %+v", c)
+	}
+}
+
+func TestTallyFoundation(t *testing.T) {
+	v := func(real bool, sev string) Vote { return Vote{Real: real, Severity: sev} }
+	f := Foundation{Votes: []Vote{v(true, "important"), v(true, "minor"), v(false, "nit")}}
+	TallyFoundation(&f, 3)
+	if f.Status != "confirmed" {
+		t.Fatal(f.Status)
+	}
+	g := Foundation{Votes: []Vote{v(true, "nit"), v(true, "nit"), v(true, "minor")}}
+	TallyFoundation(&g, 3)
+	if g.Status != "rejected" {
+		t.Fatal("taste-only claim should be rejected:", g.Status)
+	}
+}

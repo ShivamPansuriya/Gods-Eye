@@ -145,6 +145,35 @@ func Markdown(w io.Writer, rep *Report) {
 	if len(asks) > 0 {
 		fmt.Fprintf(w, "**Requested changes**\n%s\n\n", strings.Join(asks, "\n"))
 	}
+	if ds := r.Design; ds != nil {
+		var fo []string
+		for _, f := range ds.Foundations.Items {
+			if f.Status == "confirmed" {
+				fo = append(fo, fmt.Sprintf("- **%s** (`%s:%d`): %s *Fix the old code:* %s *In this PR:* %s", f.Title, f.File, f.Line, f.Problem, f.FixOld, map[string]string{"now": "fix it now. " + f.AdoptHow, "follow_up": "follow-up. " + f.AdoptHow, "no": "leave it."}[f.Adopt]))
+			}
+		}
+		if len(fo) > 0 {
+			fmt.Fprintf(w, "**🏛 Existing design: %s**\n%s\n%s\n\n", ds.Foundations.Verdict, ds.Foundations.Summary, strings.Join(fo, "\n"))
+		}
+		var pr []string
+		for _, p := range ds.Practices {
+			if p.Status != "followed" && p.State != "resolved" {
+				pr = append(pr, fmt.Sprintf("- %s **%s** (`%s:%d`): %s", map[string]string{"broken": "✕", "mixed": "~"}[p.Status], p.Practice, p.File, p.Line, p.Detail))
+			}
+		}
+		if len(pr) > 0 {
+			fmt.Fprintf(w, "<details><summary>Repo practices to look at (%d)</summary>\n\n%s\n</details>\n\n", len(pr), strings.Join(pr, "\n"))
+		}
+	}
+	var proof []string
+	for _, u := range r.Units {
+		if u.Evidence.Status != "" && u.Evidence.Status != "provided" && u.Evidence.Ask != "" && u.Tier != "static" {
+			proof = append(proof, fmt.Sprintf("- **%s**: %s", u.Title, u.Evidence.Ask))
+		}
+	}
+	if len(proof) > 0 {
+		fmt.Fprintf(w, "<details><summary>Proof to add (%d)</summary>\n\n%s\n</details>\n\n", len(proof), strings.Join(proof, "\n"))
+	}
 	if len(r.NotChecked) > 0 {
 		fmt.Fprintf(w, "<details><summary>Not checked by anyone (%d)</summary>\n\n- %s\n</details>\n\n", len(r.NotChecked), strings.Join(r.NotChecked, "\n- "))
 	}

@@ -112,6 +112,16 @@ Derive criteria from the description, issues and guidance first; infer the obvio
 - not_done: the code contradicts or misses it; say exactly what is missing.
 - no_evidence: probably works, nothing proves it (kind gap).
 
+### Evidence (move each unit from "trust me" to "check this")
+change_type: bug_fix, feature, ui, performance, api, refactor, data, config, docs or test. Each kind needs its own proof:
+- ui: the same screen before and after, same size and crop (a video if it moves);
+- bug_fix: the same input on the old and new code, with both real outputs, or a test that fails before and passes after;
+- performance: the same workload measured on both sides, more than once;
+- config / build / CLI: the real command output before and after;
+- api: the code a caller would write to use it, or a test that calls it;
+- refactor: tests that pin the old behaviour and still pass; data: the migration run on realistic data.
+evidence.status: provided (the description, commits or tests in this diff show it), partial, or missing. evidence.have ≤ 20 words: what proof exists ("RowsCsvExportServiceTest covers STACKED dates"; "none"). evidence.ask ≤ 30 words: the exact proof to request, concrete enough to do ("Export one Summary with sections on main and on this branch; attach both CSVs"); empty when provided.
+
 ### Blast radius
 What outside the unit is affected. basis seen_in_diff, seen_in_repo (you saw it in <callers> or via a tool), or inferred.
 
