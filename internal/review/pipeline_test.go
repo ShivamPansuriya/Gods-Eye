@@ -207,3 +207,14 @@ func TestTallyFoundation(t *testing.T) {
 		t.Fatal("taste-only claim should be rejected:", g.Status)
 	}
 }
+
+func TestMergeDropsAsksTheFindingRestates(t *testing.T) {
+	d := exampleDiff(t)
+	r := &Review{Units: []Unit{{ID: "U1", Hunks: []string{"H2"}, Tier: "agent", Risk: "low",
+		Ask: []string{"Replace time.Sleep with a select on ctx.Done() and a timer.", "Add a test that forces ErrBusy."}}}}
+	Merge(r, d, []Finding{{ID: "F1", Hunk: "H2", File: "internal/index/writer.go", Line: 29, Status: "confirmed", Introduced: true,
+		Severity: "important", Title: "Sleep ignores cancellation", Fix: "Select on ctx.Done() and a timer instead of time.Sleep."}})
+	if got := r.Units[0].Ask; len(got) != 2 || !strings.Contains(got[0], "ErrBusy") || !strings.HasPrefix(got[1], "Sleep ignores cancellation") {
+		t.Fatalf("asks = %q", got)
+	}
+}

@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>God's Eye</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: a top bar, then one column of cards per screen. Same tokens as the review page. */
+:root{
+  --bg:#f4f5f7; --panel:#ffffff; --side:#eceef2; --ink:#14171c; --muted:#5b6270; --faint:#959cab; --line:#dde1e7; --hover:#e5e8ee;
+  --iris:#2d55c6; --iris-bg:#e8edfb; --iris-ink:#ffffff;
+  --ok:#237a49; --ok-bg:#e3f3e9; --bad:#b42a24; --bad-bg:#fbe9e7; --warn:#9a6210; --warn-bg:#fbf1df;
+  --shadow:0 1px 2px rgba(20,23,28,.06),0 6px 24px rgba(20,23,28,.06);
+  --display:"Bricolage Grotesque",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --sans:"IBM Plex Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#101216; --panel:#171a20; --side:#13161b; --ink:#e8eaee; --muted:#a3aab7; --faint:#6b7280; --line:#272b33; --hover:#1f232a;
+  --iris:#86a2f7; --iris-bg:#1c2440; --iris-ink:#0d1120; --ok:#6fcf97; --ok-bg:#15291d; --bad:#f28b82; --bad-bg:#2e1716; --warn:#f0bd62; --warn-bg:#2a2214;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 28px rgba(0,0,0,.35); color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#101216; --panel:#171a20; --side:#13161b; --ink:#e8eaee; --muted:#a3aab7; --faint:#6b7280; --line:#272b33; --hover:#1f232a;
+  --iris:#86a2f7; --iris-bg:#1c2440; --iris-ink:#0d1120; --ok:#6fcf97; --ok-bg:#15291d; --bad:#f28b82; --bad-bg:#2e1716; --warn:#f0bd62; --warn-bg:#2a2214;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 28px rgba(0,0,0,.35); color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%}
+body{background:var(--bg);color:var(--ink);font:15px/1.55 var(--sans);-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--iris);outline-offset:2px}
+a{color:var(--iris);text-decoration:none} a:hover{text-decoration:underline}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.015em;text-wrap:balance;margin:0}
+h1{font-size:clamp(26px,3.6vw,34px);line-height:1.15}
+h2{font-size:20px}
+.lbl{font:600 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.mono{font-family:var(--mono);font-size:12.5px}
+.muted{color:var(--muted)}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--panel)}
+.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:6;display:flex;align-items:center;gap:6px 16px;flex-wrap:wrap;min-height:54px;padding:6px max(16px,env(safe-area-inset-right,0px)) 6px max(16px,env(safe-area-inset-left,0px));background:var(--panel);border-bottom:1px solid var(--line)}
+.brand{font:700 17px var(--display);display:flex;align-items:center;gap:8px;color:var(--ink);text-decoration:none!important}
+.brand svg{color:var(--iris)}
+.nav{display:flex;gap:2px}
+.nav a{color:var(--muted);padding:6px 10px;border-radius:8px;text-decoration:none!important;font-size:14px}
+.nav a:hover{background:var(--hover);color:var(--ink)}
+.nav a.on{background:var(--iris-bg);color:var(--iris);font-weight:600}
+.grow{flex:1}
+.iconbtn{background:none;border:1px solid transparent;border-radius:8px;padding:5px 7px;color:var(--muted);display:inline-flex}
+.iconbtn:hover{background:var(--hover);color:var(--ink)}
+main{max-width:1080px;margin:0 auto;padding:28px max(16px,env(safe-area-inset-right,0px)) 80px max(16px,env(safe-area-inset-left,0px));display:grid;gap:18px}
+main>*{min-width:0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 20px;min-width:0}
+.card>header{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--panel);border-radius:9px;padding:7px 13px;font-weight:500;font-size:14px;white-space:nowrap}
+.btn:hover{border-color:var(--ink)}
+.btn.pri{background:var(--iris);border-color:var(--iris);color:var(--iris-ink)}
+.btn.pri:hover{filter:brightness(1.08)}
+.btn.danger{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 40%,var(--line))}
+.btn.sm{padding:4px 10px;font-size:13px}
+.btn[disabled]{opacity:.5;cursor:default}
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 16px}
+.stat b{display:block;font:700 26px/1.2 var(--display);font-variant-numeric:tabular-nums}
+.stat span{color:var(--muted);font-size:13px}
+.check{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:4px 10px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
+.check:first-of-type{border-top:0}
+.tick{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:700}
+.tick.y{background:var(--ok);color:var(--panel)} .tick.n{border:2px solid var(--line)}
+.repos{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+.repo{display:block;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;color:var(--ink);text-decoration:none!important}
+.repo:hover{border-color:var(--iris)}
+.repo b{font-weight:600;overflow-wrap:anywhere}
+.repo .m{display:flex;gap:6px 10px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin-top:8px}
+.chip{display:inline-flex;align-items:center;gap:4px;font:600 10.5px/1 var(--mono);letter-spacing:.05em;text-transform:uppercase;padding:4px 7px;border-radius:5px;white-space:nowrap;background:var(--side);color:var(--muted)}
+.chip.ok{background:var(--ok-bg);color:var(--ok)} .chip.bad{background:var(--bad-bg);color:var(--bad)} .chip.warn{background:var(--warn-bg);color:var(--warn)} .chip.iris{background:var(--iris-bg);color:var(--iris)}
+.tscroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%}
+th,td{text-align:left;padding:9px 8px;border-top:1px solid var(--line);font-size:14px;vertical-align:top;font-variant-numeric:tabular-nums}
+th{font-weight:600;color:var(--muted);font-size:12px;border-top:0;white-space:nowrap}
+td.t{min-width:200px}
+.pr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 14px;padding:14px 0;border-top:1px solid var(--line);align-items:center}
+.pr:first-child{border-top:0}
+.pr .title{font-weight:600;overflow-wrap:anywhere}
+.pr .m{display:flex;gap:6px 10px;flex-wrap:wrap;align-items:center;font-size:12.5px;color:var(--muted);margin-top:4px}
+#tab{display:grid;gap:18px}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);overflow-x:auto}
+.tabs a{padding:9px 14px;color:var(--muted);text-decoration:none!important;border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}
+.tabs a.on{color:var(--ink);border-bottom-color:var(--iris);font-weight:600}
+.field{display:grid;gap:5px;margin:0 0 14px}
+.field label{font-weight:600;font-size:14px}
+.field .hint{color:var(--muted);font-size:13px}
+input[type=text],input[type=password],input[type=number],input[type=search],select{width:100%;max-width:520px;border:1px solid var(--line);background:var(--bg);border-radius:9px;padding:8px 11px}
+.switch{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-top:1px solid var(--line)}
+.switch:first-of-type{border-top:0}
+.switch input{margin-top:4px;width:18px;height:18px;accent-color:var(--iris)}
+.switch b{display:block;font-weight:600}
+.switch span{color:var(--muted);font-size:13.5px}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 18px}
+.log{background:#0f1216;color:#d7dde6;border-radius:12px;padding:14px 16px;font:12.5px/1.65 var(--mono);max-height:460px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}
+.log .cur{color:#86a2f7}
+.timeline{display:grid;gap:0}
+.round{display:grid;grid-template-columns:44px minmax(0,1fr) auto;gap:4px 14px;padding:14px 0;border-top:1px solid var(--line);align-items:start}
+.round:first-child{border-top:0}
+.rnum{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;font:700 14px var(--display);background:var(--iris-bg);color:var(--iris)}
+.round .m{display:flex;gap:6px 12px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin-top:4px;align-items:center}
+.empty{color:var(--faint)}
+.notice{border-radius:12px;padding:12px 16px;background:var(--warn-bg);color:var(--ink)}
+.notice.err{background:var(--bad-bg)}
+.login{max-width:440px;margin:10vh auto 0}
+.toast{position:fixed;bottom:calc(20px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:9px 14px;border-radius:9px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;max-width:calc(100% - 32px);z-index:20}
+.toast.on{opacity:1}
+.spin{display:inline-block;width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:sp .8s linear infinite;vertical-align:-1px}
+@keyframes sp{to{transform:rotate(360deg)}}
+.confirm{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:var(--bad-bg);border-radius:10px;padding:10px 12px}
+@media (max-width:760px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.grid2{grid-template-columns:minmax(0,1fr)}.pr{grid-template-columns:minmax(0,1fr)}.round{grid-template-columns:40px minmax(0,1fr)}.round .act{grid-column:2}}
+@media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="#/"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>God's Eye</a>
+  <nav class="nav" id="nav"><a href="#/" data-n="home">Dashboard</a><a href="#/connect" data-n="connect">Connect repo</a><a href="#/settings" data-n="settings">Settings</a></nav>
+  <div class="grow"></div>
+  <span id="live" class="muted" style="font-size:13px"></span>
+  <button class="iconbtn" id="theme" aria-label="Toggle theme"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
+</header>
+<main id="main"></main>
+<div class="toast" id="toast" role="status"></div>
+<script>
+(function(){
+"use strict";
+const $ = s => document.querySelector(s);
+const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let poll = null;
+function toast(m){ const t=$("#toast"); t.textContent=m; t.classList.add("on"); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove("on"),2600) }
+async function api(path, opts){
+  opts = opts || {};
+  const r = await fetch(path, {method: opts.method||"GET", headers: opts.body?{"Content-Type":"application/json"}:{}, body: opts.body?JSON.stringify(opts.body):undefined, credentials:"same-origin"});
+  if (r.status === 401 && !path.startsWith("/api/login")) { location.hash = "#login"; throw new Error("Sign in first."); }
+  const j = await r.json().catch(()=>({}));
+  if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
+  return j;
+}
+function ago(t){ if (!t || t.startsWith("0001")) return ""; const s = (Date.now() - new Date(t))/1000; if (s < 60) return "just now"; if (s < 3600) return Math.floor(s/60)+" min ago"; if (s < 86400) return Math.floor(s/3600)+" h ago"; return Math.floor(s/86400)+" d ago"; }
+function dur(sec){ if (!sec) return ""; return sec < 90 ? Math.round(sec)+" s" : (sec/60).toFixed(1)+" min" }
+function money(x){ return "$" + (x||0).toFixed(2) }
+const VERDICT = {approve:["ok","Looks good"], request_changes:["bad","Changes needed"], needs_decision:["warn","Needs a decision"]};
+function statusChip(rv){
+  if (!rv) return `<span class="chip">Not reviewed</span>`;
+  if (rv.status==="queued") return `<span class="chip iris">Queued</span>`;
+  if (rv.status==="running") return `<span class="chip iris"><span class="spin"></span> Reviewing</span>`;
+  if (rv.status==="failed") return `<span class="chip bad">Failed</span>`;
+  if (rv.status==="cancelled") return `<span class="chip">Cancelled</span>`;
+  const v = VERDICT[rv.verdict] || ["", rv.verdict||"Done"];
+  return `<span class="chip ${v[0]}">${esc(v[1])}</span>`;
+}
+function counts(rv){ if (!rv || rv.status!=="done") return ""; return `<span>${rv.bugs} bug${rv.bugs===1?"":"s"}</span>${rv.minor?`<span>${rv.minor} minor</span>`:""}${rv.design?`<span>${rv.design} design</span>`:""}<span>${money(rv.costUsd)}</span>` }
+function setNav(n){ document.querySelectorAll("#nav a").forEach(a=>a.classList.toggle("on", a.dataset.n===n)) }
+function stopPoll(){ if (poll) { clearInterval(poll); poll = null; } }
+$("#theme").onclick = () => { const r=document.documentElement; const dark = r.dataset.theme ? r.dataset.theme==="dark" : matchMedia("(prefers-color-scheme: dark)").matches; r.dataset.theme = dark?"light":"dark"; try{localStorage.setItem("godseye:theme", r.dataset.theme)}catch(e){} };
+try { const t=localStorage.getItem("godseye:theme"); if(t) document.documentElement.dataset.theme=t } catch(e){}
+
+/* ---------- login ---------- */
+function viewLogin(){
+  setNav(""); $("#nav").hidden = true;
+  $("#main").innerHTML = `<div class="card login"><h1 style="margin-bottom:6px">Sign in</h1><p class="muted" style="margin:0 0 16px">Paste the admin token. The server prints it when it starts, and it is saved in <span class="mono">config.json</span> in the data folder.</p><form id="lf"><div class="field"><label for="tok">Admin token</label><input type="password" id="tok" autocomplete="current-password" required></div><button class="btn pri" type="submit">Sign in</button> <span id="lerr" class="muted"></span></form></div>`;
+  $("#lf").onsubmit = async e => { e.preventDefault(); try { await api("/api/login", {method:"POST", body:{token: $("#tok").value}}); $("#nav").hidden = false; location.hash = "#/"; } catch(err) { $("#lerr").textContent = err.message; } };
+}
+
+/* ---------- dashboard ---------- */
+async function viewHome(){
+  setNav("home");
+  $("#main").innerHTML = `<p class="muted">Loading…</p>`;
+  const [st, repos, recent] = await Promise.all([api("/api/status"), api("/api/repos"), api("/api/reviews?limit=15")]);
+  const done = recent.filter(r=>r.status==="done");
+  let h = `<div class="row" style="justify-content:space-between"><div><span class="lbl">Dashboard</span><h1>Your reviews</h1></div><a class="btn pri" href="#/connect">+ Connect repository</a></div>`;
+  h += `<div class="stats"><div class="stat"><b>${repos.length}</b><span>connected repositories</span></div><div class="stat"><b>${st.running + st.queued}</b><span>${st.running} running · ${st.queued} queued</span></div><div class="stat"><b>${repos.filter(r=>r.settings.autoReview).length}</b><span>with auto review on</span></div><div class="stat"><b>${money(st.spend30d)}</b><span>spent in 30 days${st.monthlyBudget?` of ${money(st.monthlyBudget)}`:""}</span></div></div>`;
+  const steps = [
+    [!!st.githubUser, "Connect GitHub", st.githubUser ? `Signed in as <b>${esc(st.githubUser)}</b>` : st.githubError ? `Token rejected: ${esc(st.githubError)}` : "Add a GitHub token so God's Eye can read pull requests.", "#/settings"],
+    [!!st.anthropic, "Add a Claude API key", st.anthropic ? (st.anthropicFromEnv ? "Found in the server environment." : "Saved in Settings.") : "Set ANTHROPIC_API_KEY on the server, or add a key in Settings.", "#/settings"],
+    [repos.length>0, "Connect a repository", repos.length ? `${repos.length} connected.` : "Pick the repositories to review.", "#/connect"],
+    [!!st.publicUrl, "Turn on automatic reviews (optional)", st.publicUrl ? `GitHub sends events to <span class="mono">${esc(st.webhookUrl)}</span>` : "Set the server's public URL, then install the webhook on a repo.", "#/settings"],
+  ];
+  if (steps.some(s=>!s[0])) h += `<div class="card"><header><h2>Set up</h2><span class="muted">${steps.filter(s=>s[0]).length} of ${steps.length} done</span></header>${steps.map(([ok,t,d,href])=>`<div class="check"><span class="tick ${ok?"y":"n"}">${ok?"✓":""}</span><div><b>${t}</b><div class="muted" style="font-size:13.5px">${d}</div></div>${ok?"":`<a class="btn sm" href="${href}">Open</a>`}</div>`).join("")}</div>`;
+  h += `<div class="card"><header><h2>Repositories</h2></header>${repos.length ? `<div class="repos">${repos.map(r=>`<a class="repo" href="#/repo/${esc(r.fullName)}"><b>${esc(r.fullName)}</b><div class="m">${r.settings.autoReview?`<span class="chip ok">Auto review</span>`:`<span class="chip">Manual</span>`}${r.hookId?`<span class="chip iris">Webhook</span>`:""}<span>${r.reviews} review${r.reviews===1?"":"s"}</span>${r.last?`<span>last ${ago(r.last.createdAt)}</span>`:""}</div>${r.last?`<div class="m">${statusChip(r.last)}<span>#${r.last.pr} ${esc((r.last.title||"").slice(0,48))}</span></div>`:""}</a>`).join("")}</div>` : `<p class="empty">No repositories yet. <a href="#/connect">Connect one</a>.</p>`}</div>`;
+  h += `<div class="card"><header><h2>Recent reviews</h2><span class="muted">${done.length ? money(done.reduce((a,r)=>a+r.costUsd,0)) + " for the last " + done.length : ""}</span></header>${reviewTable(recent, true)}</div>`;
+  $("#main").innerHTML = h;
+  if (st.running + st.queued > 0) { stopPoll(); poll = setInterval(()=>{ if (location.hash==="#/"||location.hash==="") viewHome().catch(()=>{}); }, 4000); }
+}
+function reviewTable(rs, withRepo){
+  if (!rs.length) return `<p class="empty">No reviews yet.</p>`;
+  return `<div class="tscroll"><table><tr>${withRepo?"<th>Repository</th>":""}<th>Pull request</th><th>Round</th><th>Result</th><th>Found</th><th>Trigger</th><th>When</th><th></th></tr>${rs.map(r=>`<tr>${withRepo?`<td><a href="#/repo/${esc(r.repo)}">${esc(r.repo)}</a></td>`:""}<td class="t"><a href="#/pr/${esc(r.repo)}/${r.pr}">#${r.pr}</a> ${esc(r.title||"")}</td><td>${r.round||"–"}</td><td>${statusChip(r)}</td><td class="muted" style="font-size:13px">${counts(r).replace(/<\/span><span>/g," · ").replace(/<\/?span>/g,"")}</td><td><span class="chip">${esc(r.trigger)}</span></td><td class="muted">${ago(r.createdAt)}</td><td>${r.status==="done"?`<a class="btn sm" href="/r/${r.id}" target="_blank" rel="noopener">Open</a>`:`<a class="btn sm" href="#/review/${r.id}">Progress</a>`}</td></tr>`).join("")}</table></div>`;
+}
+
+/* ---------- connect ---------- */
+async function viewConnect(){
+  setNav("connect");
+  let h = `<div><span class="lbl">Connect</span><h1>Connect a repository</h1></div>`;
+  h += `<div class="card"><form id="mf" class="row"><input type="text" id="manual" placeholder="owner/name" aria-label="Repository owner/name" style="max-width:320px"><button class="btn pri">Connect</button><span class="muted" id="merr"></span></form></div>`;
+  h += `<div class="card"><header><h2>Your GitHub repositories</h2><input type="search" id="q" placeholder="Filter" aria-label="Filter repositories" style="max-width:240px"></header><div id="glist"><p class="muted">Loading from GitHub…</p></div></div>`;
+  $("#main").innerHTML = h;
+  $("#mf").onsubmit = async e => { e.preventDefault(); try { const r = await api("/api/repos", {method:"POST", body:{fullName: $("#manual").value}}); toast("Connected " + r.fullName); location.hash = "#/repo/" + r.fullName; } catch(err){ $("#merr").textContent = err.message; } };
+  let rs = [];
+  try { rs = await api("/api/github/repos"); } catch(err) { $("#glist").innerHTML = `<div class="notice err">${esc(err.message)}</div>`; return; }
+  const draw = () => { const q = ($("#q").value||"").toLowerCase(); const f = rs.filter(r=>r.full_name.toLowerCase().includes(q)); $("#glist").innerHTML = f.length ? `<div class="tscroll"><table><tr><th>Repository</th><th>Updated</th><th></th></tr>${f.map(r=>`<tr><td class="t"><b>${esc(r.full_name)}</b> ${r.private?`<span class="chip">private</span>`:""}<div class="muted" style="font-size:13px">${esc(r.description||"")}</div></td><td class="muted">${ago(r.updated_at)}</td><td>${r.connected?`<a class="btn sm" href="#/repo/${esc(r.full_name)}">Open</a>`:`<button class="btn sm pri" data-c="${esc(r.full_name)}">Connect</button>`}</td></tr>`).join("")}</table></div>` : `<p class="empty">No repositories match.</p>`;
+    document.querySelectorAll("[data-c]").forEach(b => b.onclick = async () => { b.disabled = true; try { await api("/api/repos", {method:"POST", body:{fullName: b.dataset.c}}); toast("Connected " + b.dataset.c); location.hash = "#/repo/" + b.dataset.c; } catch(err){ toast(err.message); b.disabled = false; } }); };
+  $("#q").oninput = draw; draw();
+}
+
+/* ---------- repository ---------- */
+async function viewRepo(owner, name, tab){
+  setNav("");
+  const full = owner + "/" + name;
+  const repos = await api("/api/repos"); const rp = repos.find(r=>r.fullName===full);
+  if (!rp) { $("#main").innerHTML = `<div class="notice err">${esc(full)} is not connected. <a href="#/connect">Connect it</a>.</div>`; return; }
+  tab = tab || "pulls";
+  let h = `<div class="row" style="justify-content:space-between"><div><span class="lbl">Repository</span><h1>${esc(full)}</h1></div><div class="row">${rp.settings.autoReview?`<span class="chip ok">Auto review on</span>`:`<span class="chip">Auto review off</span>`}<a class="btn sm" href="${esc(rp.htmlUrl)}" target="_blank" rel="noopener">GitHub ↗</a></div></div>`;
+  h += `<nav class="tabs">${[["pulls","Open pull requests"],["history","Review history"],["settings","Settings"]].map(([k,l])=>`<a href="#/repo/${esc(full)}/${k}" class="${tab===k?"on":""}">${l}</a>`).join("")}</nav><div id="tab"></div>`;
+  $("#main").innerHTML = h;
+  if (tab === "pulls") return repoPulls(full);
+  if (tab === "history") { const rs = await api("/api/reviews?repo=" + encodeURIComponent(full) + "&limit=200"); $("#tab").innerHTML = `<div class="card">${reviewTable(rs, false)}</div>`; return; }
+  return repoSettings(rp);
+}
+async function repoPulls(full){
+  $("#tab").innerHTML = `<div class="card"><p class="muted">Loading pull requests…</p></div>`;
+  let ps;
+  try { ps = await api(`/api/repos/${full}/pulls`); } catch(err) { $("#tab").innerHTML = `<div class="notice err">${esc(err.message)}</div>`; return; }
+  const busy = ps.some(p=>p.last && (p.last.status==="queued"||p.last.status==="running"));
+  $("#tab").innerHTML = `<div class="card">${ps.length ? ps.map(p => {
+    const l = p.last, running = l && (l.status==="queued"||l.status==="running");
+    const act = running ? `<a class="btn sm" href="#/review/${l.id}"><span class="spin"></span> Progress</a>` : l && l.status==="done" ? `${p.stale?`<button class="btn sm pri" data-rv="${p.number}">Review new commits</button>`:`<button class="btn sm" data-rv="${p.number}">Review again</button>`}<a class="btn sm" href="/r/${l.id}" target="_blank" rel="noopener">Open review</a>` : `<button class="btn sm pri" data-rv="${p.number}">Review now</button>`;
+    return `<div class="pr"><div><a class="title" href="#/pr/${esc(full)}/${p.number}">#${p.number} ${esc(p.title)}</a><div class="m">${p.draft?`<span class="chip">Draft</span>`:""}<span>${esc(p.user.login)}</span><span>${esc(p.head.ref)} → ${esc(p.base.ref)}</span><span>updated ${ago(p.updated_at)}</span>${statusChip(l)}${p.rounds?`<span>${p.rounds} round${p.rounds>1?"s":""}</span>`:""}${p.stale?`<span class="chip warn">New commits</span>`:""}${counts(l)}</div></div><div class="row">${act}</div></div>`; }).join("") : `<p class="empty">No open pull requests.</p>`}</div>`;
+  document.querySelectorAll("[data-rv]").forEach(b => b.onclick = async () => { b.disabled = true; try { const r = await api(`/api/repos/${full}/pulls/${b.dataset.rv}/review`, {method:"POST", body:{}}); toast("Review queued"); location.hash = "#/review/" + r.id; } catch(err){ toast(err.message); b.disabled = false; } });
+  if (busy) { stopPoll(); poll = setInterval(()=>{ if (location.hash.startsWith("#/repo/"+full)) repoPulls(full).catch(()=>{}); }, 5000); }
+}
+async function repoSettings(rp){
+  const s = rp.settings, st = await api("/api/status");
+  const sw = (id, on, t, d) => `<label class="switch"><input type="checkbox" id="${id}" ${on?"checked":""}><span><b>${t}</b><span>${d}</span></span></label>`;
+  let h = `<div class="card"><header><h2>Automatic reviews</h2></header>`;
+  h += sw("autoReview", s.autoReview, "Review pull requests automatically", "When GitHub reports a pull request event, start a review without anyone clicking.");
+  h += sw("onOpen", s.onOpen, "When a pull request is opened", "Also when it is reopened or marked ready for review.");
+  h += sw("onPush", s.onPush, "When new commits are pushed", "Runs a new round that looks only at what changed since the last review.");
+  h += sw("skipDrafts", s.skipDrafts, "Skip draft pull requests", "Wait until the author marks it ready.");
+  h += sw("comment", s.comment, "Post a summary comment on the pull request", "Verified bugs, design problems and a link to the full review.");
+  h += `</div>`;
+  h += `<div class="card"><header><h2>Review depth and cost</h2></header><div class="grid2"><div class="field"><label for="depth">Depth</label><select id="depth">${[["quick","Quick: map the PR, no bug hunting"],["standard","Standard: hunters + 3 voters"],["deep","Deep: two hunter lenses"]].map(([v,l])=>`<option value="${v}" ${s.depth===v?"selected":""}>${l}</option>`).join("")}</select></div><div class="field"><label for="effort">Reasoning effort</label><select id="effort">${["low","medium","high","xhigh","max"].map(v=>`<option ${s.effort===v?"selected":""}>${v}</option>`).join("")}</select></div><div class="field"><label for="budget">Spend limit per review (USD)</label><input type="number" id="budget" min="1" max="200" step="1" value="${s.budget}"><span class="hint">New verifications stop above this.</span></div></div><button class="btn pri" id="save">Save settings</button></div>`;
+  h += `<div class="card"><header><h2>GitHub webhook</h2>${rp.hookId?`<span class="chip ok">Installed</span>`:`<span class="chip">Not installed</span>`}</header>`;
+  if (!st.publicUrl) h += `<div class="notice">Automatic reviews need GitHub to reach this server. Set the public URL in <a href="#/settings">Settings</a> first.</div>`;
+  else h += `<p class="muted" style="margin:0 0 12px">GitHub will send pull request events to <span class="mono">${esc(st.webhookUrl)}</span>, signed with this server's secret.</p>${rp.hookError?`<div class="notice err" style="margin-bottom:12px">${esc(rp.hookError)}</div>`:""}${rp.hookId?`<button class="btn" id="unhook">Remove webhook</button>`:`<button class="btn pri" id="hook">Install webhook</button>`}`;
+  h += `</div><div class="card"><header><h2>Disconnect</h2></header><p class="muted" style="margin:0 0 12px">Stops reviews and removes the webhook. Past reviews stay in the history.</p><div id="disc"><button class="btn danger" id="d1">Disconnect ${esc(rp.fullName)}</button></div></div>`;
+  $("#tab").innerHTML = h;
+  $("#save").onclick = async () => { try { await api(`/api/repos/${rp.fullName}/settings`, {method:"PUT", body:{autoReview:$("#autoReview").checked, onOpen:$("#onOpen").checked, onPush:$("#onPush").checked, skipDrafts:$("#skipDrafts").checked, comment:$("#comment").checked, depth:$("#depth").value, effort:$("#effort").value, budget:+$("#budget").value}}); toast("Settings saved"); viewRepo(...rp.fullName.split("/"), "settings"); } catch(err){ toast(err.message); } };
+  ["autoReview","onOpen","onPush","skipDrafts","comment"].forEach(id => $("#"+id).onchange = () => $("#save").click());
+  const hook = $("#hook"), unhook = $("#unhook");
+  if (hook) hook.onclick = async () => { hook.disabled = true; try { await api(`/api/repos/${rp.fullName}/webhook`, {method:"POST"}); toast("Webhook installed"); } catch(err){ toast(err.message); } viewRepo(...rp.fullName.split("/"), "settings"); };
+  if (unhook) unhook.onclick = async () => { try { await api(`/api/repos/${rp.fullName}/webhook`, {method:"DELETE"}); toast("Webhook removed"); } catch(err){ toast(err.message); } viewRepo(...rp.fullName.split("/"), "settings"); };
+  $("#d1").onclick = () => { $("#disc").innerHTML = `<div class="confirm"><span>Disconnect ${esc(rp.fullName)}? Reviews stop; history stays.</span><button class="btn danger" id="d2">Yes, disconnect</button><button class="btn" id="d3">Keep it</button></div>`; $("#d3").onclick = () => repoSettings(rp); $("#d2").onclick = async () => { await api(`/api/repos/${rp.fullName}`, {method:"DELETE"}); toast("Disconnected"); location.hash = "#/"; }; };
+}
+
+/* ---------- pull request: rounds ---------- */
+async function viewPR(owner, name, n){
+  setNav("");
+  const full = owner + "/" + name;
+  const rs = await api(`/api/reviews?repo=${encodeURIComponent(full)}&pr=${n}&limit=100`);
+  const title = (rs.find(r=>r.title)||{}).title || "";
+  let h = `<div class="row" style="justify-content:space-between"><div><span class="lbl"><a href="#/repo/${esc(full)}">${esc(full)}</a> · pull request</span><h1>#${n} ${esc(title)}</h1></div><div class="row"><button class="btn pri" id="go">Review now</button><button class="btn" id="fresh" title="Ignore earlier rounds and review the whole PR again">Full re-review</button></div></div>`;
+  const rounds = rs.filter(r=>r.status==="done");
+  h += `<div class="card"><header><h2>Review rounds</h2><span class="muted">${rounds.length} finished · ${money(rs.reduce((a,r)=>a+r.costUsd,0))} total</span></header><div class="timeline">${rs.length ? rs.map(r=>`<div class="round"><span class="rnum">${r.round||"·"}</span><div><div class="row" style="gap:8px">${statusChip(r)}<b>${r.round?`Round ${r.round}`:esc(r.status)}</b><span class="mono muted">${esc((r.headSha||"").slice(0,7))}</span></div><div class="m">${counts(r)}<span class="chip">${esc(r.trigger)}</span><span>${ago(r.createdAt)}</span>${r.seconds?`<span>${dur(r.seconds)}</span>`:""}${r.commentUrl?`<a href="${esc(r.commentUrl)}" target="_blank" rel="noopener">PR comment ↗</a>`:""}${r.error?`<span style="color:var(--bad)">${esc(r.error)}</span>`:""}</div></div><div class="act row">${r.status==="done"?`<a class="btn sm pri" href="/r/${r.id}" target="_blank" rel="noopener">Open review</a>`:""}<a class="btn sm" href="#/review/${r.id}">Log</a></div></div>`).join("") : `<p class="empty">Not reviewed yet.</p>`}</div></div>`;
+  $("#main").innerHTML = h;
+  const start = async fresh => { try { const r = await api(`/api/repos/${full}/pulls/${n}/review`, {method:"POST", body:{fresh}}); toast("Review queued"); location.hash = "#/review/" + r.id; } catch(err){ toast(err.message); } };
+  $("#go").onclick = () => start(false); $("#fresh").onclick = () => start(true);
+}
+
+/* ---------- one review: live progress ---------- */
+async function viewReview(id){
+  setNav("");
+  const draw = async () => {
+    const { review: r, hasReport } = await api("/api/reviews/" + id);
+    const live = r.status==="queued"||r.status==="running";
+    let h = `<div class="row" style="justify-content:space-between"><div><span class="lbl"><a href="#/repo/${esc(r.repo)}">${esc(r.repo)}</a> · <a href="#/pr/${esc(r.repo)}/${r.pr}">#${r.pr}</a></span><h1>${esc(r.title || ("Pull request #" + r.pr))}</h1></div><div class="row">${statusChip(r)}${live?`<button class="btn danger" id="cancel">Cancel</button>`:""}${hasReport?`<a class="btn pri" href="/r/${r.id}" target="_blank" rel="noopener">Open the review →</a>`:""}</div></div>`;
+    if (r.status==="done") h += `<div class="stats"><div class="stat"><b style="color:${r.bugs?"var(--bad)":"var(--ok)"}">${r.bugs}</b><span>verified bugs</span></div><div class="stat"><b>${r.minor}</b><span>minor issues</span></div><div class="stat"><b>${r.design}</b><span>problems in the existing design</span></div><div class="stat"><b>${money(r.costUsd)}</b><span>${dur(r.seconds)} · round ${r.round}</span></div></div>`;
+    if (r.error) h += `<div class="notice err">${esc(r.error)}</div>`;
+    const log = (r.log||[]);
+    h += `<div class="card"><header><h2>${live?"Progress":"Log"}</h2><span class="muted">${r.trigger} · started ${ago(r.startedAt||r.createdAt)}</span></header><div class="log" id="log">${log.length?log.map((l,i)=>`<div class="${live&&i===log.length-1?"cur":""}">${esc(l)}</div>`).join(""):"Waiting for a free worker…"}</div></div>`;
+    $("#main").innerHTML = h;
+    const lg = $("#log"); lg.scrollTop = lg.scrollHeight;
+    const c = $("#cancel"); if (c) c.onclick = async () => { await api(`/api/reviews/${id}/cancel`, {method:"POST"}); toast("Cancelling"); };
+    if (!live) stopPoll();
+  };
+  await draw();
+  stopPoll(); poll = setInterval(() => { if (location.hash === "#/review/" + id) draw().catch(()=>{}); else stopPoll(); }, 2000);
+}
+
+/* ---------- settings ---------- */
+async function viewSettings(){
+  setNav("settings");
+  const [c, st] = await Promise.all([api("/api/config"), api("/api/status")]);
+  let h = `<div><span class="lbl">Settings</span><h1>Server settings</h1></div>`;
+  h += `<div class="card"><header><h2>GitHub</h2>${st.githubUser?`<span class="chip ok">Signed in as ${esc(st.githubUser)}</span>`:st.githubError?`<span class="chip bad">Token rejected</span>`:`<span class="chip">Not connected</span>`}</header><div class="field"><label for="gt">Personal access token</label><input type="password" id="gt" placeholder="${c.githubToken?esc(c.githubToken):"github_pat_…"}" autocomplete="off"><span class="hint">Fine-grained token with read access to Contents, Pull requests and Metadata; add write to Pull requests to post comments, and Webhooks (admin) to install webhooks. Leave empty to keep the current one.</span></div><div class="field"><label for="ga">API base URL</label><input type="text" id="ga" value="${esc(c.githubApi||"")}" placeholder="https://api.github.com"><span class="hint">For GitHub Enterprise Server: https://HOST/api/v3</span></div></div>`;
+  h += `<div class="card"><header><h2>Automatic reviews</h2></header><div class="field"><label for="pu">Public URL of this server</label><input type="text" id="pu" value="${esc(c.publicUrl||"")}" placeholder="https://reviews.example.com"><span class="hint">GitHub sends webhooks to this URL + /webhook/github, and PR comments link back to it.</span></div>${st.webhookUrl?`<p class="muted" style="margin:0">Webhook URL: <span class="mono">${esc(st.webhookUrl)}</span></p>`:""}</div>`;
+  h += `<div class="card"><header><h2>Claude</h2>${st.anthropic?`<span class="chip ok">Ready</span>`:`<span class="chip bad">No key</span>`}</header>${c.anthropicFromEnv?`<p class="muted" style="margin:0 0 12px">Using the API key from the server environment.</p>`:`<div class="field"><label for="ak">Anthropic API key</label><input type="password" id="ak" placeholder="${c.anthropicKey?esc(c.anthropicKey):"sk-ant-…"}" autocomplete="off"><span class="hint">Or set ANTHROPIC_API_KEY on the server and restart.</span></div>`}<div class="grid2"><div class="field"><label for="md">Model</label><input type="text" id="md" value="${esc(c.model||"")}" placeholder="claude-opus-5-5"></div><div class="field"><label for="cc">Reviews at the same time</label><input type="number" id="cc" min="1" max="8" value="${c.concurrency}"><span class="hint">Takes effect after a restart.</span></div><div class="field"><label for="mb">Monthly budget for automatic reviews (USD)</label><input type="number" id="mb" min="0" step="10" value="${c.monthlyBudget||0}"><span class="hint">0 means no limit. Manual reviews still run.</span></div></div></div>`;
+  h += `<div class="row"><button class="btn pri" id="save">Save settings</button><button class="btn" id="out">Sign out</button></div>`;
+  $("#main").innerHTML = h;
+  $("#save").onclick = async () => {
+    const body = {githubApi: $("#ga").value, publicUrl: $("#pu").value, model: $("#md").value, concurrency: +$("#cc").value, monthlyBudget: +$("#mb").value};
+    if ($("#gt").value) body.githubToken = $("#gt").value;
+    const ak = $("#ak"); if (ak && ak.value) body.anthropicKey = ak.value;
+    try { await api("/api/config", {method:"PUT", body}); toast("Settings saved"); viewSettings(); } catch(err){ toast(err.message); }
+  };
+  $("#out").onclick = async () => { await api("/api/logout", {method:"POST"}); location.hash = "#login"; };
+}
+
+/* ---------- router ---------- */
+async function route(){
+  stopPoll();
+  const h = location.hash.replace(/^#/, "");
+  const p = h.split("/").filter(Boolean);
+  try {
+    if (h === "login") return viewLogin();
+    $("#nav").hidden = false;
+    if (p[0] === "connect") return await viewConnect();
+    if (p[0] === "settings") return await viewSettings();
+    if (p[0] === "repo" && p.length >= 3) return await viewRepo(p[1], p[2], p[3]);
+    if (p[0] === "pr" && p.length >= 4) return await viewPR(p[1], p[2], +p[3]);
+    if (p[0] === "review" && p[1]) return await viewReview(p[1]);
+    return await viewHome();
+  } catch(err) {
+    if (location.hash !== "#login") $("#main").innerHTML = `<div class="notice err">${esc(err.message)}</div>`;
+  }
+}
+window.addEventListener("hashchange", route);
+route();
+})();
+</script>
+</body>
+</html>

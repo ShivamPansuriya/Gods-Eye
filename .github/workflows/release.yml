@@ -1,0 +1,17 @@
+# Publishes prebuilt binaries for `gh extension install` when a v* tag is pushed.
+# gh installs extensions only from repositories named gh-<name>, so this takes
+# effect once the repository is renamed to gh-gods-eye.
+name: Release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cli/gh-extension-precompile@v2
+        with:
+          go_version_file: go.mod

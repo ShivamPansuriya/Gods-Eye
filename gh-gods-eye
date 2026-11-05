@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# GitHub CLI extension entry point. No server needed:
+#   gh gods-eye review 123        review PR #123 of the current repo (uses your gh login)
+#   gh gods-eye review 123 --comment
+#   gh gods-eye history           list past reviews; gh gods-eye open <id> reopens one
+#   gh gods-eye serve             run the web app instead
+set -euo pipefail
+src="${BASH_SOURCE[0]}"
+while [ -L "$src" ]; do d="$(cd -P "$(dirname "$src")" && pwd)"; src="$(readlink "$src")"; [[ $src != /* ]] && src="$d/$src"; done
+here="$(cd -P "$(dirname "$src")" && pwd)"
+bin="$here/bin/gods-eye"
+if [ ! -x "$bin" ] || [ -n "$(find "$here" \( -name '*.go' -o -name '*.html' -o -name go.mod \) -newer "$bin" -not -path '*/evals/*' -print -quit 2>/dev/null)" ]; then
+  command -v go >/dev/null 2>&1 || { echo "gh gods-eye builds itself once with Go 1.25+ (https://go.dev/dl). Install Go and run it again." >&2; exit 1; }
+  echo "› Building gods-eye (first run or after an update)…" >&2
+  (cd "$here" && go build -trimpath -o "$bin" .)
+fi
+exec "$bin" "$@"

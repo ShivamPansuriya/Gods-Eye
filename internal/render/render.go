@@ -28,6 +28,8 @@ type Meta struct {
 	Title   string `json:"title"`
 	HeadSHA string `json:"headSha"`
 	Issues  []int  `json:"issues"`
+	// ReviewURL links the PR comment to the full review page (server mode).
+	ReviewURL string `json:"reviewUrl,omitempty"`
 }
 
 // Report is everything rendered; it's also what --save writes and --from reads.
@@ -180,7 +182,10 @@ func Markdown(w io.Writer, rep *Report) {
 	if len(r.WatchAfterDeploy) > 0 {
 		fmt.Fprintf(w, "<details><summary>Watch after deploy</summary>\n\n- %s\n</details>\n\n", strings.Join(r.WatchAfterDeploy, "\n- "))
 	}
-	if rep.Meta.Number > 0 {
+	switch {
+	case rep.Meta.ReviewURL != "":
+		fmt.Fprintf(w, "**[Open the full review →](%s)** <sub>architecture map, code flows, verified bugs, existing-design check</sub>\n", rep.Meta.ReviewURL)
+	case rep.Meta.Number > 0:
 		fmt.Fprintf(w, "<sub>Run `gods-eye %d` for the full review with diagrams.</sub>\n", rep.Meta.Number)
 	}
 }

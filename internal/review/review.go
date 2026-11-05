@@ -191,6 +191,14 @@ func Merge(r *Review, d *diff.Diff, fs []Finding) {
 				}
 			}
 			if f.Fix != "" {
+				// The verified finding's fix replaces the mapper's own wording of the same ask.
+				kept := u.Ask[:0]
+				for _, a := range u.Ask {
+					if overlap(a, f.Title+" "+f.Fix) < 0.4 {
+						kept = append(kept, a)
+					}
+				}
+				u.Ask = kept
 				ask := f.Title + ": " + f.Fix
 				dup := false
 				for _, a := range u.Ask {
@@ -248,3 +256,34 @@ func clampWords(s string, n int) string {
 	}
 	return strings.TrimRight(strings.Join(f[:n], " "), ",;:") + "…"
 }
+
+// overlap is the share of the shorter text's meaningful words found in the other.
+func overlap(a, b string) float64 {
+	words := func(s string) map[string]bool {
+		m := map[string]bool{}
+		for _, w := range strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
+			return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_')
+		}) {
+			if len(w) >= 4 && !stopWords[w] {
+				m[w] = true
+			}
+		}
+		return m
+	}
+	wa, wb := words(a), words(b)
+	if len(wa) == 0 || len(wb) == 0 {
+		return 0
+	}
+	if len(wb) < len(wa) {
+		wa, wb = wb, wa
+	}
+	n := 0
+	for w := range wa {
+		if wb[w] {
+			n++
+		}
+	}
+	return float64(n) / float64(len(wa))
+}
+
+var stopWords = map[string]bool{"that": true, "this": true, "with": true, "when": true, "then": true, "from": true, "into": true, "only": true, "after": true, "before": true, "should": true, "would": true, "make": true, "pass": true, "return": true, "returns": true}

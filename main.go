@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go/v2"
@@ -27,7 +28,9 @@ import (
 	"github.com/ShivamPansuriya/gods-eye/internal/render"
 	"github.com/ShivamPansuriya/gods-eye/internal/review"
 	"github.com/ShivamPansuriya/gods-eye/internal/risk"
+	"github.com/ShivamPansuriya/gods-eye/internal/server"
 	"github.com/ShivamPansuriya/gods-eye/internal/source"
+	"github.com/ShivamPansuriya/gods-eye/internal/store"
 	"github.com/ShivamPansuriya/gods-eye/internal/workspace"
 )
 
@@ -41,6 +44,8 @@ Usage:
   gods-eye --diff x.diff         review a saved diff
   gods-eye --from report.json    re-render a saved review without calling the API
   gods-eye eval evals/cases.json score the reviewer against known bugs
+  gods-eye history               list reviews run from this folder; gods-eye open <id> reopens one
+  gods-eye serve                 run the web app: connect repos, review from the UI, auto-review on PR events
 
 Depth (like Quick / Standard / Deep):
   quick     one mapping agent: units, tiers, flows, checks
@@ -79,9 +84,23 @@ func main() {
 		showVer  = flag.Bool("version", false, "print version")
 	)
 	flag.Usage = func() { fmt.Fprint(os.Stderr, usage); flag.PrintDefaults() }
-	if len(os.Args) > 1 && os.Args[1] == "eval" {
-		runEval(os.Args[2:])
-		return
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "eval":
+			runEval(os.Args[2:])
+			return
+		case "serve":
+			runServe(os.Args[2:])
+			return
+		case "history":
+			runHistory(os.Args[2:])
+			return
+		case "open":
+			runOpen(os.Args[2:])
+			return
+		case "review": // `gh gods-eye review 123` reads naturally
+			os.Args = append(os.Args[:1], os.Args[2:]...)
+		}
 	}
 	flag.Parse()
 	if *showVer {
@@ -154,6 +173,9 @@ func main() {
 			}
 		}
 		rep = render.NewReport(in, d, r)
+		if *revFile == "" {
+			saveCLIReview(in, rep)
+		}
 	}
 
 	if *save != "" {
@@ -376,4 +398,108 @@ func runEval(args []string) {
 		b, _ := json.MarshalIndent(results, "", "  ")
 		check(os.WriteFile(*out, b, 0o644))
 	}
+}
+
+// saveCLIReview keeps every CLI review in .godseye so `gods-eye history` can list it.
+func saveCLIReview(in *source.Input, rep *render.Report) {
+	st, err := store.Open(".godseye")
+	if err != nil {
+		return
+	}
+	r := rep.Review
+	rec := store.Review{ID: store.NewReviewID(), Repo: in.Repo, PR: in.Number, Title: r.Title, Author: in.Author,
+		HeadSHA: in.HeadSHA, Trigger: "cli", Status: "done", Verdict: r.Verdict, Units: len(r.Units),
+		CreatedAt: time.Now().UTC(), FinishedAt: time.Now().UTC()}
+	if p := r.Pipeline; p != nil {
+		rec.Round, rec.Bugs, rec.Minor, rec.CostUSD, rec.Seconds = p.Round, p.Confirmed, p.Minor, p.CostUSD, p.Seconds
+	}
+	if r.Design != nil {
+		for _, f := range r.Design.Foundations.Items {
+			if f.Status == "confirmed" {
+				rec.Design++
+			}
+		}
+	}
+	if st.SaveReport(rec.ID, rep) == nil && st.SaveReview(rec) == nil {
+		step("Saved as review %s (gods-eye history)", rec.ID)
+	}
+}
+
+func runHistory(args []string) {
+	fs := flag.NewFlagSet("history", flag.ExitOnError)
+	dir := fs.String("data", ".godseye", "data folder")
+	pr := fs.Int("pr", 0, "only this PR number")
+	fs.Parse(args)
+	st, err := store.Open(*dir)
+	check(err)
+	rs, _ := st.Reviews("", *pr, 50)
+	if len(rs) == 0 {
+		fmt.Println("No reviews saved in", *dir)
+		return
+	}
+	fmt.Printf("%-24s  %-6s  %-5s  %-16s  %5s  %6s  %s\n", "ID", "PR", "ROUND", "VERDICT", "BUGS", "COST", "TITLE")
+	for _, r := range rs {
+		pr := "-"
+		if r.PR > 0 {
+			pr = fmt.Sprintf("#%d", r.PR)
+		}
+		title := r.Title
+		if len(title) > 48 {
+			title = title[:47] + "…"
+		}
+		fmt.Printf("%-24s  %-6s  %-5d  %-16s  %5d  $%5.2f  %s\n", r.ID, pr, r.Round, r.Verdict, r.Bugs, r.CostUSD, title)
+	}
+	fmt.Println("\nReopen one with: gods-eye open <id>")
+}
+
+func runOpen(args []string) {
+	fs := flag.NewFlagSet("open", flag.ExitOnError)
+	dir := fs.String("data", ".godseye", "data folder")
+	serveAddr := fs.String("serve", "", "serve the page on this addr instead of opening a file")
+	fs.Parse(args)
+	if fs.NArg() == 0 {
+		fail("usage: gods-eye open <review id>   (see gods-eye history)")
+	}
+	st, err := store.Open(*dir)
+	check(err)
+	p, ok := st.ReportPath(fs.Arg(0))
+	if !ok {
+		fail("no saved review %s in %s", fs.Arg(0), *dir)
+	}
+	b, err := os.ReadFile(p)
+	check(err)
+	rep := &render.Report{}
+	check(json.Unmarshal(b, rep))
+	out := filepath.Join(*dir, fs.Arg(0)+".html")
+	f, err := os.Create(out)
+	check(err)
+	check(render.HTML(f, rep))
+	check(f.Close())
+	abs, _ := filepath.Abs(out)
+	step("Review page: %s", abs)
+	if *serveAddr != "" {
+		check(serveFile(*serveAddr, abs))
+		return
+	}
+	openBrowser(abs)
+}
+
+func runServe(args []string) {
+	fs := flag.NewFlagSet("serve", flag.ExitOnError)
+	addr := fs.String("addr", ":8080", "listen address")
+	home, _ := os.UserHomeDir()
+	dir := fs.String("data", filepath.Join(home, ".gods-eye"), "data folder (settings, repos, every review)")
+	fs.Parse(args)
+	srv, err := server.New(*dir)
+	check(err)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	shown := *addr
+	if strings.HasPrefix(shown, ":") || strings.HasPrefix(shown, "0.0.0.0:") {
+		shown = "localhost:" + shown[strings.LastIndex(shown, ":")+1:]
+	}
+	step("God's Eye is running on http://%s", shown)
+	step("Data folder: %s", *dir)
+	step("Admin token (sign in with this): %s", srv.AdminToken())
+	check(srv.Run(ctx, *addr))
 }

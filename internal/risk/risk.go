@@ -118,3 +118,13 @@ func matchParts(g, p []string) bool {
 	}
 	return len(p) == 0
 }
+
+// Parse reads rules from .godseye.json content and appends them to the defaults.
+func Parse(b []byte) []Rule {
+	rules := append([]Rule{}, Defaults...)
+	var c Config
+	if json.Unmarshal(b, &c) == nil {
+		rules = append(rules, c.Rules...)
+	}
+	return rules
+}

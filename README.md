@@ -46,6 +46,54 @@ gh / git ──► diff (H1..Hn) ──► caller index (git grep for every chan
 - **Re-review rounds:** the state of each review is saved in `.godseye/state/`. On the next run, hunters look only at what changed since the last reviewed commit and are told what was already reported. Earlier bugs whose code is gone are marked **Fixed**. From round 3, the page suggests rethinking the approach instead of patching line by line. Use `--fresh` to start over.
 - **Empirical evidence:** `--verify-cmd "go test ./..."` runs the command in the checkout and feeds its output to every agent.
 
+## Three ways to run it
+
+| | For | Needs |
+|---|---|---|
+| **Web app** (`gods-eye serve`) | A team: connect GitHub repos, review PRs from the UI, auto-review every PR, keep every review | A machine GitHub can reach (for automatic reviews) |
+| **GitHub CLI** (`gh gods-eye review 123`) | One person, no server: review a PR from your terminal with your `gh` login | `gh` and Go |
+| **GitHub Action** | Every PR, no server: posts the summary comment, attaches the full page | A repo secret with the Claude key |
+
+All three keep history in the same format, and `gods-eye history` / `gods-eye open <id>` reopen any past review.
+
+### Web app
+
+```bash
+gods-eye serve --addr :8080 --data ~/.gods-eye
+```
+
+Or with Docker:
+
+```bash
+docker build -t gods-eye . && docker run -p 8080:8080 -v godseye:/data -e ANTHROPIC_API_KEY=sk-ant-... gods-eye
+```
+
+The server prints an **admin token**; sign in with it. Then, in the UI:
+
+1. **Settings:** add a GitHub token. A fine-grained token needs read access to *Contents*, *Pull requests* and *Metadata*. To post comments it also needs write on *Pull requests*, and to install webhooks it needs *Webhooks* (repo admin). GitHub Enterprise works through the API base URL.
+2. **Connect repo:** pick from your repositories.
+3. **Open pull requests:** press **Review now**, then watch the live progress. Every round is kept. **Review new commits** runs an incremental round, and **Full re-review** starts over.
+4. **Automatic reviews:** set the server's **public URL** in Settings, then on the repo's Settings tab turn on *Review pull requests automatically* and press **Install webhook**. New PRs, new commits, PRs leaving draft, and reopened PRs then start a review by themselves. You choose which of these count, and whether to post the summary on the PR. Webhooks are verified with an HMAC secret, and a monthly budget can pause automatic reviews.
+
+Data lives in the data folder as plain JSON: settings (`config.json`, mode 0600), connected repos, every review and its full report, and blobless clones used for code access. The GitHub token is sent to git as a header per command and is never written into a clone's config.
+
+### GitHub CLI extension (no server)
+
+```bash
+git clone https://github.com/ShivamPansuriya/gods-eye gh-gods-eye
+```
+```bash
+cd gh-gods-eye && gh extension install .
+```
+```bash
+gh gods-eye review 123            # in any clone of the repo; add --comment to post the summary
+```
+```bash
+gh gods-eye history               # past reviews; gh gods-eye open <id> reopens one
+```
+
+The extension builds itself once with Go. `gh` only installs extensions straight from GitHub when the repository is named `gh-<name>`, so the clone is named `gh-gods-eye`. If this repository is renamed to `gh-gods-eye`, `.github/workflows/release.yml` publishes prebuilt binaries on each `v*` tag, and then `gh extension install ShivamPansuriya/gh-gods-eye` works directly, with no Go needed.
+
 ## Install
 
 ```bash
