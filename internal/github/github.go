@@ -252,6 +252,37 @@ func (c *Client) Comment(ctx context.Context, fullName string, n int, body strin
 	return out.HTMLURL, err
 }
 
+// ReviewComment is a comment pinned to one line of a PR's diff.
+type ReviewComment struct {
+	Path string `json:"path"`
+	Line int    `json:"line"`
+	Side string `json:"side"`
+	Body string `json:"body"`
+}
+
+// Review posts a PR review: the summary as its body and each comment on its
+// line. If GitHub refuses a line (422, e.g. the line left the diff), it posts
+// the summary as a plain comment instead so nothing is lost.
+func (c *Client) Review(ctx context.Context, fullName string, n int, commit, body string, comments []ReviewComment) (string, int, error) {
+	if len(comments) == 0 {
+		u, err := c.Comment(ctx, fullName, n, body)
+		return u, 0, err
+	}
+	var out struct {
+		HTMLURL string `json:"html_url"`
+	}
+	req := map[string]any{"event": "COMMENT", "body": body, "comments": comments}
+	if commit != "" {
+		req["commit_id"] = commit
+	}
+	err := c.do(ctx, "POST", fmt.Sprintf("/repos/%s/pulls/%d/reviews", fullName, n), req, "", &out)
+	if e, ok := err.(*Error); ok && e.Status == 422 {
+		u, err := c.Comment(ctx, fullName, n, body)
+		return u, 0, err
+	}
+	return out.HTMLURL, len(comments), err
+}
+
 // Hook is a repository webhook.
 type Hook struct {
 	ID     int64    `json:"id"`

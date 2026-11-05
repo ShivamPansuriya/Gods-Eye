@@ -86,11 +86,13 @@ git clone https://github.com/ShivamPansuriya/gods-eye gh-gods-eye
 cd gh-gods-eye && gh extension install .
 ```
 ```bash
-gh gods-eye review 123            # in any clone of the repo; add --comment to post the summary
+gh gods-eye review 123 --comment  # in any clone of the repo; posts the review on the PR
 ```
 ```bash
 gh gods-eye history               # past reviews; gh gods-eye open <id> reopens one
 ```
+
+With `--comment`, the review goes up as a GitHub PR review from your account: the summary as the review body, and one comment on the exact line of each verified bug (what goes wrong, the fix, how many verifiers agreed). Bugs on lines the PR didn't touch stay in the summary, because GitHub only allows line comments inside the diff. On later rounds only new bugs get line comments. The web app posts reviews the same way.
 
 The extension builds itself once with Go. `gh` only installs extensions straight from GitHub when the repository is named `gh-<name>`, so the clone is named `gh-gods-eye`. If this repository is renamed to `gh-gods-eye`, `.github/workflows/release.yml` publishes prebuilt binaries on each `v*` tag, and then `gh extension install ShivamPansuriya/gh-gods-eye` works directly, with no Go needed.
 
@@ -113,7 +115,7 @@ gods-eye 123                        # review PR #123 in the current repo
 gods-eye https://github.com/o/r/pull/123
 gods-eye 123 --repo owner/name
 gods-eye --local --base main        # current branch vs main, no GitHub needed
-gods-eye 123 --comment              # also post a short summary on the PR
+gods-eye 123 --comment              # also post the review on the PR, with a comment on each bug's line
 gods-eye 123 --effort medium        # cheaper / faster
 gods-eye 123 --save r.json          # keep the raw review; re-render with --from r.json
 ```

@@ -75,7 +75,7 @@ func main() {
 		out      = flag.String("out", "", "write the HTML page here (default: .godseye/<pr>.html)")
 		noOpen   = flag.Bool("no-open", false, "don't open the page in a browser")
 		serve    = flag.String("serve", "", "serve the page over HTTP on this `addr` (e.g. :8080) instead of opening a file")
-		comment  = flag.Bool("comment", false, "post a short summary comment on the PR")
+		comment  = flag.Bool("comment", false, "post the review on the PR: a summary plus a comment on each verified bug's line")
 		md       = flag.Bool("md", false, "print the Markdown summary to stdout")
 		save     = flag.String("save", "", "also save the raw review JSON to `file`")
 		from     = flag.String("from", "", "render from a saved review JSON `file` (no API call)")
@@ -211,14 +211,7 @@ func main() {
 		if rep.Meta.Number == 0 {
 			fail("--comment needs a GitHub PR")
 		}
-		args := []string{"pr", "comment", fmt.Sprint(rep.Meta.Number), "--body-file", "-"}
-		if rep.Meta.Repo != "" {
-			args = append(args, "--repo", rep.Meta.Repo)
-		}
-		cmd := exec.Command("gh", args...)
-		cmd.Stdin, cmd.Stdout, cmd.Stderr = &mdBuf, os.Stderr, os.Stderr
-		check(cmd.Run())
-		step("Posted summary comment on #%d", rep.Meta.Number)
+		postReview(rep, &mdBuf)
 	}
 	if *serve != "" {
 		check(serveFile(*serve, abs))
@@ -502,4 +495,39 @@ func runServe(args []string) {
 	step("Data folder: %s", *dir)
 	step("Admin token (sign in with this): %s", srv.AdminToken())
 	check(srv.Run(ctx, *addr))
+}
+
+// postReview posts the summary as a GitHub PR review with one comment on each
+// verified bug's line, through the user's gh login. If GitHub refuses the line
+// comments, the summary goes up as a plain PR comment instead.
+func postReview(rep *render.Report, md *bytes.Buffer) {
+	repo := rep.Meta.Repo
+	if repo == "" {
+		repo = "{owner}/{repo}" // gh fills these in from the current clone
+	}
+	cs := render.InlineComments(rep)
+	if len(cs) > 0 {
+		req := map[string]any{"event": "COMMENT", "body": md.String(), "comments": cs}
+		if rep.Meta.HeadSHA != "" {
+			req["commit_id"] = rep.Meta.HeadSHA
+		}
+		b, _ := json.Marshal(req)
+		cmd := exec.Command("gh", "api", "-X", "POST", fmt.Sprintf("repos/%s/pulls/%d/reviews", repo, rep.Meta.Number), "--input", "-", "--jq", ".html_url")
+		var errBuf bytes.Buffer
+		cmd.Stdin, cmd.Stderr = bytes.NewReader(b), &errBuf
+		out, err := cmd.Output()
+		if err == nil {
+			step("Posted review on #%d with %d line comments: %s", rep.Meta.Number, len(cs), strings.TrimSpace(string(out)))
+			return
+		}
+		step("GitHub refused the line comments (%s); posting the summary only", strings.TrimSpace(errBuf.String()))
+	}
+	args := []string{"pr", "comment", fmt.Sprint(rep.Meta.Number), "--body-file", "-"}
+	if rep.Meta.Repo != "" {
+		args = append(args, "--repo", rep.Meta.Repo)
+	}
+	cmd := exec.Command("gh", args...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = md, os.Stderr, os.Stderr
+	check(cmd.Run())
+	step("Posted summary comment on #%d", rep.Meta.Number)
 }

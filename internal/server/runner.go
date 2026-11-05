@@ -294,11 +294,15 @@ func (r *Runner) run(ctx context.Context, rec *store.Review) error {
 	if s.Comment {
 		var b bytes.Buffer
 		render.Markdown(&b, rep)
-		if u, err := gh.Comment(ctx, rec.Repo, rec.PR, b.String()); err != nil {
-			r.logf(rec.ID, "Could not post the PR comment: %v", err)
+		var cs []github.ReviewComment
+		for _, c := range render.InlineComments(rep) {
+			cs = append(cs, github.ReviewComment(c))
+		}
+		if u, n, err := gh.Review(ctx, rec.Repo, rec.PR, rec.HeadSHA, b.String(), cs); err != nil {
+			r.logf(rec.ID, "Could not post the PR review: %v", err)
 		} else {
 			rec.CommentURL = u
-			r.logf(rec.ID, "Posted the summary on the PR")
+			r.logf(rec.ID, "Posted the review on the PR (%d line comments)", n)
 		}
 	}
 	return nil
