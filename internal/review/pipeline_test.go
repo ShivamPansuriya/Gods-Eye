@@ -63,6 +63,11 @@ func TestTallyMajority(t *testing.T) {
 		{[]Vote{v(true, true, "nit"), v(true, true, "nit"), v(true, true, "important")}, "nit", true},
 		{[]Vote{v(true, true, "minor"), v(true, true, "minor"), v(true, true, "nit")}, "confirmed", true}, // minor bugs stay visible
 	}
+	sec := Finding{Category: "security", Votes: []Vote{v(true, true, "minor"), v(true, true, "important"), v(true, true, "minor")}}
+	tally(&sec, 3)
+	if sec.Status != "confirmed" || sec.Severity != "important" {
+		t.Errorf("security finding = %s/%s, want confirmed/important", sec.Status, sec.Severity)
+	}
 	for i, c := range cases {
 		f := Finding{Votes: c.votes}
 		tally(&f, 3)

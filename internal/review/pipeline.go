@@ -670,6 +670,11 @@ func tally(f *Finding, voters int) {
 		f.Status, f.Severity = "confirmed", "important"
 	case (important+minor)*2 > real:
 		f.Status, f.Severity = "confirmed", "minor"
+		// A verified security hole stays blocking when any voter calls it
+		// important: hiding an auth bypass as "minor" costs far more than a false alarm.
+		if f.Category == "security" && important > 0 {
+			f.Severity = "important"
+		}
 	default:
 		f.Status, f.Severity = "nit", "nit"
 	}

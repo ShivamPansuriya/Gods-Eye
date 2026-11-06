@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"path"
 	"strings"
 
 	"github.com/ShivamPansuriya/gods-eye/internal/diff"
@@ -206,7 +207,7 @@ func writeMergeRisk(w io.Writer, mr *review.MergeRisk) {
 		why := strings.ReplaceAll(s.Reason, "|", "\\|")
 		for _, c := range s.Claims {
 			if c.Status == "confirmed" {
-				why += fmt.Sprintf(" `%s:%d`", c.File, c.Line)
+				why += fmt.Sprintf(" `%s:%d`", path.Base(c.File), c.Line)
 			}
 		}
 		fmt.Fprintf(w, "| %s | %s | %s | %s |\n", levelIcon[s.Level], s.Name, s.Grade, why)

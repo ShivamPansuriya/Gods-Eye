@@ -254,7 +254,7 @@ func BuildMergeRisk(r *Review, d *diff.Diff, rules []risk.Rule, verifyExit int, 
 	var why []string
 	if floor, reason := risk.Floor(rules, paths); floor == risk.Human {
 		im.Level = 2
-		why = append(why, "touches "+reason)
+		why = append(why, "touches "+shortPaths(reason))
 	}
 	if lines > 400 || files > 15 {
 		im.Level = max(im.Level, 1)
@@ -323,7 +323,7 @@ func BuildMergeRisk(r *Review, d *diff.Diff, rules []risk.Rule, verifyExit int, 
 		case x.Kind != "rollback": // costly, no line to point at
 			rb.Level = 1
 		case x.Status == "rejected":
-			rb.Level, rb.Reason = 0, "Verifiers found it can be reverted safely: "+x.Reject
+			rb.Level, rb.Reason = 0, "A plain revert is enough: the verifiers rejected the one-way-door claim."
 		case x.Grade == "one_way":
 			rb.Level = 2
 		default:
@@ -421,6 +421,19 @@ func BuildMergeRisk(r *Review, d *diff.Diff, rules []risk.Rule, verifyExit int, 
 	return mr
 }
 
+// shortPaths turns "auth code (src/a/b/login.go)" into "auth code (login.go)".
+func shortPaths(s string) string {
+	i, j := strings.LastIndex(s, "("), strings.LastIndex(s, ")")
+	if i < 0 || j < i {
+		return s
+	}
+	p := s[i+1 : j]
+	if k := strings.LastIndex(p, "/"); k >= 0 {
+		p = p[k+1:]
+	}
+	return s[:i+1] + p + s[j:]
+}
+
 func plural(n int) string {
 	if n == 1 {
 		return " is"
@@ -452,7 +465,7 @@ func AutoDepth(d *diff.Diff, rules []risk.Rule, only map[string]bool) (string, s
 		return "quick", "no code to hunt bugs in (docs, lockfiles or assets only)"
 	}
 	if floor, why := risk.Floor(rules, paths); floor == risk.Human {
-		return "deep", "touches " + why
+		return "deep", "touches " + shortPaths(why)
 	}
 	if lines > 600 {
 		return "deep", fmt.Sprintf("%d changed lines of code", lines)

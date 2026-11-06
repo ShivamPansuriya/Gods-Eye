@@ -151,7 +151,9 @@ h1{font-size:clamp(28px,4.2vw,42px);line-height:1.08;margin:14px 0 14px;font-wei
 .mrisk .sig .why{color:var(--muted);overflow-wrap:anywhere}
 .mrisk .claims{grid-column:2/-1;display:grid;gap:6px;margin-top:4px}
 .mrisk .claim{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;font-size:13.5px;overflow-wrap:anywhere}
-.mrisk .claim.rej{opacity:.6} .mrisk .claim.rej b{text-decoration:line-through}
+.mrisk .claim.rej{opacity:.65} .mrisk .claim.rej>b{text-decoration:line-through}
+.mrisk details.dis summary{cursor:pointer;color:var(--muted);font-size:13px;list-style-position:inside}
+.mrisk details.dis[open]{display:grid;gap:6px}
 .mrisk .lower{padding:12px 20px;background:var(--bg);border-top:1px solid var(--line);font-size:14px}
 .mrisk .lower ul{margin:6px 0 0;padding-left:18px}
 @media (max-width:640px){.mrisk .sig{grid-template-columns:24px minmax(0,1fr) auto}.mrisk .sig .why{grid-column:2/-1}.mrisk .claims{grid-column:1/-1}}
@@ -573,8 +575,10 @@ function mergeRiskCard(){
   RISK.signals.forEach(s => {
     const lv = s.level < 0 ? null : s.level;
     const cl = (s.claims||[]).filter(c => c.status !== "skipped");
+    const claim = c => `<div class="claim ${c.status==="rejected"?"rej":""}">${codeChip(c.file, c.line, c.hunk)}<b>${esc(c.title)}</b><span style="color:var(--muted)">${esc(c.status==="rejected"?"Dismissed: "+(c.reject||"verifiers disagreed"):c.why)}</span>${voteDots(c)}</div>`;
+    const kept = cl.filter(c => c.status !== "rejected"), gone = cl.filter(c => c.status === "rejected");
     h += `<div class="sig" title="${esc(TIP[s.key]||"")}"><span class="ic ${lv===null?"":"lv"+lv}">${lv===null?"–":IC[lv]}</span><span class="nm">${esc(s.name)}</span><span class="gr ${lv===null?"":"lv"+lv}" style="background:none">${esc(s.grade)}</span><span class="why">${esc(s.reason||"")}</span>`;
-    if (cl.length) h += `<div class="claims">${cl.map(c=>`<div class="claim ${c.status==="rejected"?"rej":""}">${codeChip(c.file, c.line, c.hunk)}<b>${esc(c.title)}</b><span style="color:var(--muted)">${esc(c.status==="rejected"?"Dismissed: "+(c.reject||"verifiers disagreed"):c.why)}</span>${voteDots(c)}</div>`).join("")}</div>`;
+    if (cl.length) h += `<div class="claims">${kept.map(claim).join("")}${gone.length?`<details class="dis"><summary>${gone.length} claim${gone.length>1?"s":""} dismissed by the verifiers</summary>${gone.map(claim).join("")}</details>`:""}</div>`;
     h += `</div>`;
   });
   if ((RISK.lower||[]).length) h += `<div class="lower"><b>To lower the risk</b><ul>${RISK.lower.map(x=>`<li>${esc(x)}</li>`).join("")}</ul></div>`;
