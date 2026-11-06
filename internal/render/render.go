@@ -77,6 +77,9 @@ func Markdown(w io.Writer, rep *Report) {
 	r := rep.Review
 	fmt.Fprintf(w, "### 👁 God's Eye — %s\n\n", verdictText[r.Verdict])
 	fmt.Fprintf(w, "**%s**  \n%s\n\n", r.Title, r.ELI5)
+	if mr := r.MergeRisk; mr != nil {
+		writeMergeRisk(w, mr)
+	}
 
 	var bugs, pre []string
 	for _, f := range r.Findings {
@@ -188,4 +191,28 @@ func Markdown(w io.Writer, rep *Report) {
 	case rep.Meta.Number > 0:
 		fmt.Fprintf(w, "<sub>Run `gods-eye %d` for the full review with diagrams.</sub>\n", rep.Meta.Number)
 	}
+}
+
+var riskIcon = map[string]string{"low": "🟢", "medium": "🟡", "high": "🔴"}
+var levelIcon = map[int]string{0: "✅", 1: "⚠️", 2: "❗"}
+
+// writeMergeRisk writes the five-signal merge-risk table.
+func writeMergeRisk(w io.Writer, mr *review.MergeRisk) {
+	fmt.Fprintf(w, "**%s Merge risk: %s** · %s\n\n| | Signal | Grade | Why |\n|---|---|---|---|\n", riskIcon[mr.Overall], mr.Overall, mr.Summary)
+	for _, s := range mr.Signals {
+		if s.Level < 0 {
+			continue
+		}
+		why := strings.ReplaceAll(s.Reason, "|", "\\|")
+		for _, c := range s.Claims {
+			if c.Status == "confirmed" {
+				why += fmt.Sprintf(" `%s:%d`", c.File, c.Line)
+			}
+		}
+		fmt.Fprintf(w, "| %s | %s | %s | %s |\n", levelIcon[s.Level], s.Name, s.Grade, why)
+	}
+	if len(mr.Lower) > 0 {
+		fmt.Fprintf(w, "\n*To lower the risk:* %s\n", strings.Join(mr.Lower, " "))
+	}
+	fmt.Fprintln(w)
 }

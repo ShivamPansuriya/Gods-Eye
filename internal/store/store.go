@@ -42,7 +42,7 @@ type RepoSettings struct {
 	OnOpen     bool    `json:"onOpen"`     // when a PR is opened, reopened or marked ready
 	OnPush     bool    `json:"onPush"`     // when new commits are pushed (incremental round)
 	SkipDrafts bool    `json:"skipDrafts"`
-	Depth      string  `json:"depth"`   // quick | standard | deep
+	Depth      string  `json:"depth"`   // auto | quick | standard | deep
 	Effort     string  `json:"effort"`  // low … max
 	Budget     float64 `json:"budget"`  // max spend per review, USD
 	Comment    bool    `json:"comment"` // post a summary comment on the PR
@@ -50,7 +50,7 @@ type RepoSettings struct {
 
 // DefaultSettings are applied when a repository is connected.
 func DefaultSettings() RepoSettings {
-	return RepoSettings{AutoReview: false, OnOpen: true, OnPush: true, SkipDrafts: true, Depth: "standard", Effort: "high", Budget: 15, Comment: true}
+	return RepoSettings{AutoReview: false, OnOpen: true, OnPush: true, SkipDrafts: true, Depth: "auto", Effort: "high", Budget: 15, Comment: true}
 }
 
 // Repo is a connected repository.
@@ -81,7 +81,8 @@ type Review struct {
 	Verdict    string    `json:"verdict,omitempty"`
 	Bugs       int       `json:"bugs"`
 	Minor      int       `json:"minor"`
-	Design     int       `json:"design"` // verified problems in the existing design
+	Design     int       `json:"design"`         // verified problems in the existing design
+	Risk       string    `json:"risk,omitempty"` // merge risk: low | medium | high
 	Units      int       `json:"units"`
 	CostUSD    float64   `json:"costUsd"`
 	Seconds    float64   `json:"seconds"`

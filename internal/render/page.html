@@ -138,6 +138,23 @@ h1{font-size:clamp(28px,4.2vw,42px);line-height:1.08;margin:14px 0 14px;font-wei
 .stat{border:1px solid var(--line);border-radius:10px;padding:6px 12px;font-size:13px;color:var(--muted);background:var(--bg)}
 .stat b{color:var(--ink);font-variant-numeric:tabular-nums}
 .stat.bad b{color:var(--bad)}
+.mrisk{padding:0;overflow:hidden}
+.mrisk .mhead{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 16px;align-items:center;padding:16px 20px;border-bottom:1px solid var(--line)}
+.mrisk .grade{font:700 13px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;padding:9px 12px;border-radius:8px}
+.lv-low,.lv0{color:var(--ok);background:var(--ok-bg)} .lv-medium,.lv1{color:var(--warn);background:var(--warn-bg)} .lv-high,.lv2{color:var(--bad);background:var(--bad-bg)}
+.mrisk .meter{height:6px;border-radius:3px;background:var(--line);overflow:hidden;margin-top:6px}
+.mrisk .meter i{display:block;height:100%;border-radius:3px}
+.mrisk .sig{display:grid;grid-template-columns:24px 130px 92px minmax(0,1fr);gap:4px 12px;align-items:start;padding:11px 20px;border-bottom:1px solid var(--line)}
+.mrisk .sig:last-of-type{border-bottom:0}
+.mrisk .ic{width:22px;height:22px;border-radius:6px;display:grid;place-items:center;font:700 12px/1 var(--mono)}
+.mrisk .sig .nm{font-weight:600} .mrisk .sig .gr{font:600 11px/1.6 var(--mono);text-transform:uppercase;letter-spacing:.05em}
+.mrisk .sig .why{color:var(--muted);overflow-wrap:anywhere}
+.mrisk .claims{grid-column:2/-1;display:grid;gap:6px;margin-top:4px}
+.mrisk .claim{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;font-size:13.5px;overflow-wrap:anywhere}
+.mrisk .claim.rej{opacity:.6} .mrisk .claim.rej b{text-decoration:line-through}
+.mrisk .lower{padding:12px 20px;background:var(--bg);border-top:1px solid var(--line);font-size:14px}
+.mrisk .lower ul{margin:6px 0 0;padding-left:18px}
+@media (max-width:640px){.mrisk .sig{grid-template-columns:24px minmax(0,1fr) auto}.mrisk .sig .why{grid-column:2/-1}.mrisk .claims{grid-column:1/-1}}
 
 .path{display:grid;gap:2px}
 .prow{display:grid;grid-template-columns:28px minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 4px;border-top:1px solid var(--line);background:none;border-left:0;border-right:0;border-bottom:0;text-align:left;width:100%}
@@ -520,6 +537,7 @@ function renderStory(){
   h += `<h1>${esc(R.title)}</h1>`;
   h += `<p class="lead">${esc(STORY.what || R.eli5)}</p>`;
   if (ATTR && ATTR.agent) h += `<div class="attr" style="margin:-10px 0 22px"><b>${EYE} Written with an AI agent${ATTR.tool?` (${esc(ATTR.tool)})`:""}</b><span>${ATTR.reviewed==="yes"?"The author says they reviewed it.":ATTR.reviewed==="no"?"The author says they have not reviewed it yet: you are the first reviewer.":"The author has not said whether they reviewed it: treat yourself as the first reviewer."}</span></div>`;
+  h += mergeRiskCard();
   h += `<div class="grid2"><div class="card"><header><span class="lbl">Why this PR exists</span>${STORY.why_basis?`<span class="tag ${STORY.why_basis}">${STORY.why_basis==="stated"?"from the PR":"inferred from code"}</span>`:""}</header><p>${esc(STORY.why || "Not stated.")}</p></div>`;
   h += `<div class="card"><header><span class="lbl">Before → after</span></header><div class="ba"><span class="lbl">Before</span><span>${esc(STORY.before||"—")}</span><span class="lbl">After</span><span class="after">${esc(STORY.after||"—")}</span></div></div></div>`;
   // Your review
@@ -545,6 +563,22 @@ function renderStory(){
   h += `<p class="kbd">Keys: j / k move · a looks right · c needs change · q ask author · 1-4 views · s summary</p>`;
   $("#main").innerHTML = h;
   wire();
+}
+const RISK = R.merge_risk || null;
+function mergeRiskCard(){
+  if (!RISK) return "";
+  const IC = {0:"✓", 1:"~", 2:"!"}, TIP = {alignment:"Does the code do what the PR says, and only that?", impact:"Blast radius and sensitive paths (auth, payments, migrations…)", verification:"Is each behaviour change proven by tests or before/after output?", rollback:"If it goes wrong, does a plain revert undo it? (one-way vs two-way door)", errors:"If the new code fails in production, will anyone see it?"};
+  const col = {low:"var(--ok)", medium:"var(--warn)", high:"var(--bad)"}[RISK.overall];
+  let h = `<div class="card mrisk"><div class="mhead"><span class="grade lv-${RISK.overall}">${esc(RISK.overall)} risk</span><div><b>${esc(RISK.summary)}</b><div class="meter" title="risk score ${RISK.score}/100"><i style="width:${Math.max(4,RISK.score)}%;background:${col}"></i></div></div></div>`;
+  RISK.signals.forEach(s => {
+    const lv = s.level < 0 ? null : s.level;
+    const cl = (s.claims||[]).filter(c => c.status !== "skipped");
+    h += `<div class="sig" title="${esc(TIP[s.key]||"")}"><span class="ic ${lv===null?"":"lv"+lv}">${lv===null?"–":IC[lv]}</span><span class="nm">${esc(s.name)}</span><span class="gr ${lv===null?"":"lv"+lv}" style="background:none">${esc(s.grade)}</span><span class="why">${esc(s.reason||"")}</span>`;
+    if (cl.length) h += `<div class="claims">${cl.map(c=>`<div class="claim ${c.status==="rejected"?"rej":""}">${codeChip(c.file, c.line, c.hunk)}<b>${esc(c.title)}</b><span style="color:var(--muted)">${esc(c.status==="rejected"?"Dismissed: "+(c.reject||"verifiers disagreed"):c.why)}</span>${voteDots(c)}</div>`).join("")}</div>`;
+    h += `</div>`;
+  });
+  if ((RISK.lower||[]).length) h += `<div class="lower"><b>To lower the risk</b><ul>${RISK.lower.map(x=>`<li>${esc(x)}</li>`).join("")}</ul></div>`;
+  return h + `</div>`;
 }
 function list(a){ return a && a.length ? `<ul class="plain">${a.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>` : `<span class="empty">Nothing listed.</span>` }
 
@@ -970,6 +1004,7 @@ function composeDescription(){
   let t = `${who}\n\n## Problem\n${STORY.why||"(state the problem in one paragraph)"}\n\n## What changed\n${STORY.what||R.eli5}\n\n`;
   t += units.filter(u=>u.tier!=="static").map(u=>`- **${u.title}**: ${u.brief.replace(/\[\[|\]\]/g,"")}`).join("\n") + "\n\n## Evidence\n";
   t += units.filter(u=>u.evidence&&u.tier!=="static").map(u=>`- **${u.title}** (${CT[u.change_type]||u.change_type}): ${u.evidence.status==="provided"?u.evidence.have:`${u.evidence.have&&u.evidence.have!=="none"?u.evidence.have+". ":""}**Still needed:** ${u.evidence.ask}`}`).join("\n") + "\n\n";
+  if (RISK) { const sg = k => RISK.signals.find(s=>s.key===k); const im = sg("impact"), rb = sg("rollback"); t += `## Risk\n- **Merge risk:** ${RISK.overall}\n` + (im?`- **Impact:** ${im.grade}. ${im.reason}\n`:"") + (rb&&rb.level>=0?`- **Rollback cost:** ${rb.grade}. ${rb.reason}\n`:"") + "\n"; }
   const lim = [...(R.not_checked||[]).map(x=>`Not checked: ${x}`), ...(R.watch_after_deploy||[]).map(x=>`Watch after deploy: ${x}`)];
   if (lim.length) t += `## Limits\n${lim.map(x=>`- ${x}`).join("\n")}\n\n`;
   t += `## ELI5\n${R.eli5||""}`;

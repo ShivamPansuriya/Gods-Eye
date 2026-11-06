@@ -48,6 +48,7 @@ Usage:
   gods-eye serve                 run the web app: connect repos, review from the UI, auto-review on PR events
 
 Depth (like Quick / Standard / Deep):
+  auto      (default) quick for docs-only changes, deep for sensitive paths or > 600 lines, else standard
   quick     one mapping agent: units, tiers, flows, checks
   standard  + bug hunters over slices of the diff, each finding verified by 3 independent voters
   deep      + two hunter lenses per slice (logic, contracts)
@@ -64,7 +65,7 @@ func main() {
 		title    = flag.String("title", "", "PR title for --diff / --local (default: from commits)")
 		model    = flag.String("model", "claude-opus-5-5", "Claude model")
 		effort   = flag.String("effort", "high", "reasoning effort: low | medium | high | xhigh | max")
-		depth    = flag.String("depth", "standard", "quick | standard | deep")
+		depth    = flag.String("depth", "auto", "auto | quick | standard | deep")
 		vEffort  = flag.String("verify-effort", "medium", "reasoning effort for the verifiers")
 		parallel = flag.Int("parallel", 8, "max concurrent API calls")
 		budget   = flag.Float64("budget", 15, "stop starting new verifications above this spend, in USD")
@@ -405,6 +406,9 @@ func saveCLIReview(in *source.Input, rep *render.Report) {
 		CreatedAt: time.Now().UTC(), FinishedAt: time.Now().UTC()}
 	if p := r.Pipeline; p != nil {
 		rec.Round, rec.Bugs, rec.Minor, rec.CostUSD, rec.Seconds = p.Round, p.Confirmed, p.Minor, p.CostUSD, p.Seconds
+	}
+	if r.MergeRisk != nil {
+		rec.Risk = r.MergeRisk.Overall
 	}
 	if r.Design != nil {
 		for _, f := range r.Design.Foundations.Items {

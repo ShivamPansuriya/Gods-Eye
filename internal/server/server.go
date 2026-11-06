@@ -379,8 +379,8 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": "Send JSON."})
 		return
 	}
-	if st.Depth != "quick" && st.Depth != "standard" && st.Depth != "deep" {
-		st.Depth = "standard"
+	if st.Depth != "auto" && st.Depth != "quick" && st.Depth != "standard" && st.Depth != "deep" {
+		st.Depth = "auto"
 	}
 	switch st.Effort {
 	case "low", "medium", "high", "xhigh", "max":

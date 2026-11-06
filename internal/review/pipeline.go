@@ -98,6 +98,13 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 		log(fmt.Sprintf("Round %d: %d files changed since %s; %d earlier findings fixed", pipe.Round, len(deltaFiles), shortSHA(p.HeadSHA), pipe.Fixed))
 	}
 
+	// 3b. Depth: "auto" spends review effort where the change needs it.
+	if opt.Depth == "auto" {
+		opt.Depth, pipe.DepthWhy = AutoDepth(d, rules, deltaFiles)
+		log(fmt.Sprintf("Depth %s: %s", opt.Depth, pipe.DepthWhy))
+	}
+	pipe.Depth = opt.Depth
+
 	tools := append(agent.ReadTools(),
 		agent.Tool{Name: "submit_review", Description: "Submit the structured review map. Ends the mapping task.", Schema: MapSchema(), Submit: true},
 		agent.Tool{Name: "submit_findings", Description: "Submit the bugs you found (possibly none). Ends the hunting task.", Schema: FindingsSchema(), Submit: true, Strict: true},
@@ -275,11 +282,16 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 	}
 
 	// 7b. Ground the design: every cited line must exist; carry earlier rounds.
+	var riskClaims []*RiskClaim
 	if design != nil {
 		st := GroundDesign(design, d, ws, pipe.Round)
 		pipe.DesignStats = &st
 		if pipe.Round > 1 {
 			CarryDesign(design, opt.Prev, ws)
+		}
+		if design.Risk != nil {
+			riskClaims = GroundRisk(design.Risk, d, ws)
+			pipe.RiskClaims = len(riskClaims)
 		}
 	}
 
@@ -293,8 +305,8 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 	if design != nil {
 		nDesign = len(design.Foundations.Items)
 	}
-	if voters > 0 && len(kept)+nDesign > 0 {
-		log(fmt.Sprintf("Verifying %d findings and %d design claims with %d independent voters each", len(kept), nDesign, voters))
+	if voters > 0 && len(kept)+nDesign+len(riskClaims) > 0 {
+		log(fmt.Sprintf("Verifying %d findings, %d design claims and %d merge-risk claims with %d independent voters each", len(kept), nDesign, len(riskClaims), voters))
 		sort.SliceStable(kept, func(a, b int) bool { return confRank(kept[a].Confidence) > confRank(kept[b].Confidence) })
 		var vwg sync.WaitGroup
 		for i := range kept {
@@ -356,7 +368,36 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 				}
 			}
 		}
+		// Merge-risk claims (drive-by edits, one-way doors, swallowed errors) too.
+		for _, c := range riskClaims {
+			if meter.Total().CostUSD > opt.Budget {
+				c.Status = "skipped"
+				continue
+			}
+			for _, l := range VerifyLenses[:voters] {
+				vwg.Add(1)
+				go func(c *RiskClaim, l Lens) {
+					defer vwg.Done()
+					raw, err := runner.Run(ctx, agent.Task{Stage: "verify", Label: "verify-" + c.ID + "-" + l.Name,
+						Prompt: verifyRiskTask(l, *c), Submit: "submit_verdict", MaxTurns: 6, Effort: opt.VerifyEff})
+					mu.Lock()
+					defer mu.Unlock()
+					if err != nil {
+						errs = append(errs, err.Error())
+						return
+					}
+					var v Vote
+					if json.Unmarshal(raw, &v) == nil {
+						v.Lens = l.Name
+						c.Votes = append(c.Votes, v)
+					}
+				}(c, l)
+			}
+		}
 		vwg.Wait()
+	}
+	for _, c := range riskClaims {
+		TallyClaim(c, voters)
 	}
 	if design != nil {
 		for i := range design.Foundations.Items {
@@ -373,6 +414,7 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 	Merge(r, d, all)
 	r.Design = design
 	AttachDesignUnits(r)
+	r.MergeRisk = BuildMergeRisk(r, d, rules, pipe.VerifyExit, pipe.VerifyCmd)
 	att := DetectAttribution(in.Body + "\n" + strings.Join(in.Commits, "\n"))
 	r.Attribution = &att
 	for _, f := range r.Findings {
@@ -426,7 +468,7 @@ func (o *Options) defaults() {
 		o.VerifyEff = "medium"
 	}
 	if o.Depth == "" {
-		o.Depth = "standard"
+		o.Depth = "auto"
 	}
 	if o.Parallel <= 0 {
 		o.Parallel = 8

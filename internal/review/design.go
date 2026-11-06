@@ -17,6 +17,7 @@ type Design struct {
 	Flows        []CodeFlow   `json:"flows"`
 	Practices    []Practice   `json:"practices"`
 	Foundations  Foundations  `json:"foundations"`
+	Risk         *RiskInput   `json:"risk,omitempty"` // merge-risk claims; grounded, voted, then scored into Review.MergeRisk
 }
 
 // Architecture is the component map of the change.
@@ -171,6 +172,12 @@ You are the architect on the team. The reviewer asks four questions; answer each
 ### 4. Is the existing design right?
 Look at the existing code and design this PR builds on or extends (not the PR's own new code). Is it correct? Report real problems in it: wrong abstractions, duplicated ownership, missing checks, unsafe patterns the PR copies or depends on. For each: title ≤ 10 words, problem ≤ 40 words, file + line + quote of the EXISTING code (must exist at the PR head), fix_old ≤ 30 words (how to fix the old code), adopt (now = this PR should include the fix because it touches or copies the problem; follow_up = fix separately; no = not worth it), adopt_how ≤ 30 words (how the new code could incorporate the fix), effort (small, medium, large), risk_if_ignored ≤ 20 words. Give foundations.verdict (sound, questionable, flawed) and summary ≤ 40 words. Zero items is a valid answer when the base is sound. At most 6 items; each is checked by independent verifiers.
 
+### 5. How risky is it to merge? (risk)
+- alignment: does the code do what the title, description and linked issues say, and only that? grade (aligned, some_drift, drifted), reason ≤ 25 words, drive_by: changes the PR's purpose does not need and the description does not mention (renames, unrelated fixes, reformatting of untouched logic): title ≤ 10 words, file + line + quote, why ≤ 30 words. At most 4; zero is normal.
+- rollback: if this is deployed and goes wrong, can a plain revert undo it? grade: two_way (revert and redeploy fully undoes it), costly (revert works but needs extra steps: cache flush, re-run a job, config change), one_way (destructive migration, data rewritten or deleted, a published API or message format others will depend on, irreversible external calls). reason ≤ 25 words, steps ≤ 30 words (how to roll back), and for costly/one_way the line that makes it so: title, file, line, quote, why. For two_way leave title/file/quote empty and line 0.
+- errors: if the new code fails in production, will anyone see it? grade (good: failures are returned, logged or reported; decent: mostly; poor: failures are swallowed or invisible), reason ≤ 25 words, gaps: places in the PR's NEW code where a failure is swallowed, ignored, or turned into a default without a log or report: title, file + line + quote, why. At most 4.
+Every quoted line is checked against the code, and every drive_by, gap and costly/one_way rollback claim is checked by independent verifiers.
+
 Plain words, short sentences. Finish by calling submit_design.`
 
 func designTaskWith(known []string) string {
@@ -198,7 +205,7 @@ Finish by calling submit_verdict.`)
 
 const designSchemaJSON = `{
   "type": "object",
-  "required": ["architecture","flows","practices","foundations"],
+  "required": ["architecture","flows","practices","foundations","risk"],
   "properties": {
     "architecture": {
       "type": "object",
@@ -235,7 +242,18 @@ const designSchemaJSON = `{
           "properties": {"title": {"type": "string"}, "problem": {"type": "string"}, "file": {"type": "string"}, "line": {"type": "integer"},
             "quote": {"type": "string"}, "fix_old": {"type": "string"},
             "adopt": {"type": "string", "enum": ["now","follow_up","no"]}, "adopt_how": {"type": "string"},
-            "effort": {"type": "string", "enum": ["small","medium","large"]}, "risk_if_ignored": {"type": "string"}}}}}}
+            "effort": {"type": "string", "enum": ["small","medium","large"]}, "risk_if_ignored": {"type": "string"}}}}}},
+    "risk": {"type": "object", "required": ["alignment","rollback","errors"],
+      "properties": {
+        "alignment": {"type": "object", "required": ["grade","reason","drive_by"], "properties": {
+          "grade": {"type": "string", "enum": ["aligned","some_drift","drifted"]}, "reason": {"type": "string"},
+          "drive_by": {"type": "array", "items": {"type": "object", "required": ["title","file","line","quote","why"], "properties": {"title": {"type": "string"}, "file": {"type": "string"}, "line": {"type": "integer"}, "quote": {"type": "string"}, "why": {"type": "string"}}}}}},
+        "rollback": {"type": "object", "required": ["grade","reason","steps","title","file","line","quote","why"], "properties": {
+          "grade": {"type": "string", "enum": ["two_way","costly","one_way"]}, "reason": {"type": "string"}, "steps": {"type": "string"},
+          "title": {"type": "string"}, "file": {"type": "string"}, "line": {"type": "integer"}, "quote": {"type": "string"}, "why": {"type": "string"}}},
+        "errors": {"type": "object", "required": ["grade","reason","gaps"], "properties": {
+          "grade": {"type": "string", "enum": ["good","decent","poor"]}, "reason": {"type": "string"},
+          "gaps": {"type": "array", "items": {"type": "object", "required": ["title","file","line","quote","why"], "properties": {"title": {"type": "string"}, "file": {"type": "string"}, "line": {"type": "integer"}, "quote": {"type": "string"}, "why": {"type": "string"}}}}}}}}
   }
 }`
 

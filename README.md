@@ -16,7 +16,8 @@ Agents write more code than people can read line by line. God's Eye doesn't try 
 3. **Hunts for bugs with code access.** Parallel agents read the repository at the PR head (`read_file`, `grep`, `list_files`), follow callers, and report only bugs they can back with a concrete scenario.
 4. **Verifies every finding by vote.** Three independent verifiers each check the finding a different way: try to disprove it, trace it with real inputs, check callers and config. Only a majority survives. Findings whose quoted code doesn't exist are dropped before voting.
 5. **Checks the "done when" criteria** from the PR, linked issues and `REVIEW.md` / `CLAUDE.md`. A `not_done` claim goes through the same vote.
-6. **Shows each unit at four depths:**
+6. **Scores merge risk on five signals** (after Warp's `/merge-risk`): **alignment** (does the code do what the PR says, and only that; drive-by edits are flagged), **impact** (size, sensitive paths, effects outside the diff), **verification** (does each change carry the proof its kind needs), **rollback cost** (a two-way door, or a one-way door such as a destructive migration), and **error detection** (would a failure on the new paths be seen, or swallowed). Line-level claims go through the same 3-voter check. You get one grade (low / medium / high), where to look first, and what would lower the risk.
+7. **Shows each unit at four depths:**
 
 | View | What you get |
 |---|---|
@@ -41,7 +42,7 @@ gh / git ──► diff (H1..Hn) ──► caller index (git grep for every chan
                  └──────────────► 3 voters per finding ──► confirmed / minor / pre-existing / dismissed
 ```
 
-- **Depth:** `--depth quick` (mapper only), `standard` (default: hunters + 3 voters), `deep` (two hunter lenses per slice: logic and contracts).
+- **Depth:** `--depth auto` (default) picks for you: `quick` when there is no code to hunt in (docs, lockfiles), `deep` for sensitive paths or more than 600 changed lines, `standard` otherwise. Or set it: `quick` (mapper only), `standard` (hunters + 3 voters), `deep` (two hunter lenses per slice: logic and contracts).
 - **Cost control:** every agent shares one cached prefix (tools, system prompt, PR header), so most input tokens are cheap cache reads. Each hunter sees only its slice of the diff, verifiers only the hunk in question. `--budget` stops new verifications above a spend limit.
 - **Re-review rounds:** the state of each review is saved in `.godseye/state/`. On the next run, hunters look only at what changed since the last reviewed commit and are told what was already reported. Earlier bugs whose code is gone are marked **Fixed**. From round 3, the page suggests rethinking the approach instead of patching line by line. Use `--fresh` to start over.
 - **Empirical evidence:** `--verify-cmd "go test ./..."` runs the command in the checkout and feeds its output to every agent.
@@ -92,7 +93,7 @@ gh gods-eye review 123 --comment  # in any clone of the repo; posts the review o
 gh gods-eye history               # past reviews; gh gods-eye open <id> reopens one
 ```
 
-With `--comment`, the review goes up as a GitHub PR review from your account: the summary as the review body, and one comment on the exact line of each verified bug (what goes wrong, the fix, how many verifiers agreed). Bugs on lines the PR didn't touch stay in the summary, because GitHub only allows line comments inside the diff. On later rounds only new bugs get line comments. The web app posts reviews the same way.
+With `--comment`, the review goes up as a GitHub PR review from your account: the summary (with the merge-risk table) as the review body, and one comment on the exact line of each verified **blocking** bug (what goes wrong, the fix, how many verifiers agreed). Minor and pre-existing bugs, and bugs on lines the PR didn't touch, stay in the summary, so the PR thread only shows what needs a person. On later rounds only new bugs get line comments. The web app posts reviews the same way.
 
 The extension builds itself once with Go. `gh` only installs extensions straight from GitHub when the repository is named `gh-<name>`, so the clone is named `gh-gods-eye`. If this repository is renamed to `gh-gods-eye`, `.github/workflows/release.yml` publishes prebuilt binaries on each `v*` tag, and then `gh extension install ShivamPansuriya/gh-gods-eye` works directly, with no Go needed.
 
@@ -124,7 +125,8 @@ It writes a single HTML file to `.godseye/pr-123.html` and opens it.
 
 ## Reviewing on the page
 
-0. The page has five parts: **Story → How it's built → the units → Is the existing design right? → Summary**.
+- The top of the page shows the **merge risk**: the overall grade, the five signals with the code behind each claim and its votes, and the steps that would lower the risk.
+- The page has five parts: **Story → How it's built → the units → Is the existing design right? → Summary**.
 1. **The story of the PR** comes first: why it exists (from the description, or inferred from code and marked as such), what it changes overall, before → after, who it affects, and where your judgement matters.
 2. **How it's built** draws the change: an **architecture map** (components by layer, new / changed / removed, before / after, hover to trace, click for files and UML members) and **code flows** you can play step by step ("after this, this happens"), each step linked to its line of code.
 3. **Your review path** walks the units in priority order. Each step asks you **one question** ("Should existing Table exports default to STACKED?"). Answer with **Looks right** (`a`), **Needs change** (`c`) or **Ask author** (`q`) and the page moves to the next step.

@@ -16,8 +16,8 @@ type InlineComment struct {
 // MaxInline caps how many line comments one review posts.
 const MaxInline = 25
 
-// InlineComments returns a line comment for every verified bug found in this
-// round on a line the PR adds or changes. Bugs from earlier rounds were already
+// InlineComments returns a line comment for every blocking verified bug found
+// in this round on a line the PR adds or changes. Bugs from earlier rounds were already
 // commented on, and lines outside the diff cannot carry a GitHub line comment
 // (they stay in the summary).
 func InlineComments(rep *Report) []InlineComment {
@@ -28,19 +28,15 @@ func InlineComments(rep *Report) []InlineComment {
 	}
 	var out []InlineComment
 	for _, f := range r.Findings {
-		if f.Status != "confirmed" || !f.InDiff || f.File == "" || f.Line <= 0 {
+		// Only what needs a human: a verified bug this PR introduces. Minor and
+		// pre-existing bugs stay in the summary, so the thread is not noisy.
+		if f.Status != "confirmed" || !f.Introduced || f.Severity == "minor" || !f.InDiff || f.File == "" || f.Line <= 0 {
 			continue
 		}
 		if f.Round != 0 && round != 0 && f.Round != round {
 			continue
 		}
 		label := "🐞 **Bug**"
-		switch {
-		case !f.Introduced:
-			label = "🕰 **Pre-existing bug**"
-		case f.Severity == "minor":
-			label = "⚠️ **Minor**"
-		}
 		var b strings.Builder
 		fmt.Fprintf(&b, "%s: %s\n\n", label, f.Title)
 		if f.Scenario != "" {

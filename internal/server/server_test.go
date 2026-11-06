@@ -126,7 +126,7 @@ func TestConnectSettingsHookAndPulls(t *testing.T) {
 	// Bad settings are normalised.
 	call(t, h, "PUT", "/api/repos/acme/shop/settings", tok, store.RepoSettings{AutoReview: true, OnOpen: true, Depth: "bogus", Effort: "max", Budget: -3})
 	rp, _ = s.Store.Repo("acme/shop")
-	if !rp.Settings.AutoReview || rp.Settings.Depth != "standard" || rp.Settings.Effort != "max" || rp.Settings.Budget != 15 {
+	if !rp.Settings.AutoReview || rp.Settings.Depth != "auto" || rp.Settings.Effort != "max" || rp.Settings.Budget != 15 {
 		t.Fatalf("settings = %+v", rp.Settings)
 	}
 	pl := call(t, h, "GET", "/api/repos/acme/shop/pulls", tok, nil)

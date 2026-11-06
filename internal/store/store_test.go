@@ -25,7 +25,7 @@ func TestStoreRoundTrip(t *testing.T) {
 		t.Fatal("secrets must be stable across loads")
 	}
 	s.SaveRepo(Repo{FullName: "a/b", Settings: DefaultSettings()})
-	if r, ok := s.Repo("a/b"); !ok || r.Settings.Depth != "standard" {
+	if r, ok := s.Repo("a/b"); !ok || r.Settings.Depth != "auto" {
 		t.Fatalf("repo = %+v %v", r, ok)
 	}
 	old := Review{ID: "20250101-000000-aaaaaa", Repo: "a/b", PR: 1, Status: "done", CostUSD: 5, CreatedAt: time.Now().AddDate(0, -2, 0)}

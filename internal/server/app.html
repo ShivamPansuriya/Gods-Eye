@@ -67,6 +67,7 @@ main>*{min-width:0}
 .stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
 .stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 16px}
 .stat b{display:block;font:700 26px/1.2 var(--display);font-variant-numeric:tabular-nums}
+.risk-low{color:var(--ok)!important} .risk-medium{color:var(--warn)!important} .risk-high{color:var(--bad)!important}
 .stat span{color:var(--muted);font-size:13px}
 .check{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:4px 10px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
 .check:first-of-type{border-top:0}
@@ -160,7 +161,7 @@ function statusChip(rv){
   const v = VERDICT[rv.verdict] || ["", rv.verdict||"Done"];
   return `<span class="chip ${v[0]}">${esc(v[1])}</span>`;
 }
-function counts(rv){ if (!rv || rv.status!=="done") return ""; return `<span>${rv.bugs} bug${rv.bugs===1?"":"s"}</span>${rv.minor?`<span>${rv.minor} minor</span>`:""}${rv.design?`<span>${rv.design} design</span>`:""}<span>${money(rv.costUsd)}</span>` }
+function counts(rv){ if (!rv || rv.status!=="done") return ""; return `<span>${rv.bugs} bug${rv.bugs===1?"":"s"}</span>${rv.minor?`<span>${rv.minor} minor</span>`:""}${rv.design?`<span>${rv.design} design</span>`:""}${rv.risk?`<span class="risk-${rv.risk}">${rv.risk} risk</span>`:""}<span>${money(rv.costUsd)}</span>` }
 function setNav(n){ document.querySelectorAll("#nav a").forEach(a=>a.classList.toggle("on", a.dataset.n===n)) }
 function stopPoll(){ if (poll) { clearInterval(poll); poll = null; } }
 $("#theme").onclick = () => { const r=document.documentElement; const dark = r.dataset.theme ? r.dataset.theme==="dark" : matchMedia("(prefers-color-scheme: dark)").matches; r.dataset.theme = dark?"light":"dark"; try{localStorage.setItem("godseye:theme", r.dataset.theme)}catch(e){} };
@@ -249,7 +250,7 @@ async function repoSettings(rp){
   h += sw("skipDrafts", s.skipDrafts, "Skip draft pull requests", "Wait until the author marks it ready.");
   h += sw("comment", s.comment, "Post a summary comment on the pull request", "Verified bugs, design problems and a link to the full review.");
   h += `</div>`;
-  h += `<div class="card"><header><h2>Review depth and cost</h2></header><div class="grid2"><div class="field"><label for="depth">Depth</label><select id="depth">${[["quick","Quick: map the PR, no bug hunting"],["standard","Standard: hunters + 3 voters"],["deep","Deep: two hunter lenses"]].map(([v,l])=>`<option value="${v}" ${s.depth===v?"selected":""}>${l}</option>`).join("")}</select></div><div class="field"><label for="effort">Reasoning effort</label><select id="effort">${["low","medium","high","xhigh","max"].map(v=>`<option ${s.effort===v?"selected":""}>${v}</option>`).join("")}</select></div><div class="field"><label for="budget">Spend limit per review (USD)</label><input type="number" id="budget" min="1" max="200" step="1" value="${s.budget}"><span class="hint">New verifications stop above this.</span></div></div><button class="btn pri" id="save">Save settings</button></div>`;
+  h += `<div class="card"><header><h2>Review depth and cost</h2></header><div class="grid2"><div class="field"><label for="depth">Depth</label><select id="depth">${[["auto","Auto: picked from size and sensitive paths"],["quick","Quick: map the PR, no bug hunting"],["standard","Standard: hunters + 3 voters"],["deep","Deep: two hunter lenses"]].map(([v,l])=>`<option value="${v}" ${s.depth===v?"selected":""}>${l}</option>`).join("")}</select></div><div class="field"><label for="effort">Reasoning effort</label><select id="effort">${["low","medium","high","xhigh","max"].map(v=>`<option ${s.effort===v?"selected":""}>${v}</option>`).join("")}</select></div><div class="field"><label for="budget">Spend limit per review (USD)</label><input type="number" id="budget" min="1" max="200" step="1" value="${s.budget}"><span class="hint">New verifications stop above this.</span></div></div><button class="btn pri" id="save">Save settings</button></div>`;
   h += `<div class="card"><header><h2>GitHub webhook</h2>${rp.hookId?`<span class="chip ok">Installed</span>`:`<span class="chip">Not installed</span>`}</header>`;
   if (!st.publicUrl) h += `<div class="notice">Automatic reviews need GitHub to reach this server. Set the public URL in <a href="#/settings">Settings</a> first.</div>`;
   else h += `<p class="muted" style="margin:0 0 12px">GitHub will send pull request events to <span class="mono">${esc(st.webhookUrl)}</span>, signed with this server's secret.</p>${rp.hookError?`<div class="notice err" style="margin-bottom:12px">${esc(rp.hookError)}</div>`:""}${rp.hookId?`<button class="btn" id="unhook">Remove webhook</button>`:`<button class="btn pri" id="hook">Install webhook</button>`}`;
@@ -284,7 +285,7 @@ async function viewReview(id){
     const { review: r, hasReport } = await api("/api/reviews/" + id);
     const live = r.status==="queued"||r.status==="running";
     let h = `<div class="row" style="justify-content:space-between"><div><span class="lbl"><a href="#/repo/${esc(r.repo)}">${esc(r.repo)}</a> · <a href="#/pr/${esc(r.repo)}/${r.pr}">#${r.pr}</a></span><h1>${esc(r.title || ("Pull request #" + r.pr))}</h1></div><div class="row">${statusChip(r)}${live?`<button class="btn danger" id="cancel">Cancel</button>`:""}${hasReport?`<a class="btn pri" href="/r/${r.id}" target="_blank" rel="noopener">Open the review →</a>`:""}</div></div>`;
-    if (r.status==="done") h += `<div class="stats"><div class="stat"><b style="color:${r.bugs?"var(--bad)":"var(--ok)"}">${r.bugs}</b><span>verified bugs</span></div><div class="stat"><b>${r.minor}</b><span>minor issues</span></div><div class="stat"><b>${r.design}</b><span>problems in the existing design</span></div><div class="stat"><b>${money(r.costUsd)}</b><span>${dur(r.seconds)} · round ${r.round}</span></div></div>`;
+    if (r.status==="done") h += `<div class="stats"><div class="stat"><b style="color:${r.bugs?"var(--bad)":"var(--ok)"}">${r.bugs}</b><span>verified bugs</span></div><div class="stat"><b>${r.minor}</b><span>minor issues</span></div><div class="stat"><b>${r.design}</b><span>problems in the existing design</span></div>${r.risk?`<div class="stat"><b class="risk-${r.risk}">${r.risk}</b><span>merge risk</span></div>`:""}<div class="stat"><b>${money(r.costUsd)}</b><span>${dur(r.seconds)} · round ${r.round}</span></div></div>`;
     if (r.error) h += `<div class="notice err">${esc(r.error)}</div>`;
     const log = (r.log||[]);
     h += `<div class="card"><header><h2>${live?"Progress":"Log"}</h2><span class="muted">${r.trigger} · started ${ago(r.startedAt||r.createdAt)}</span></header><div class="log" id="log">${log.length?log.map((l,i)=>`<div class="${live&&i===log.length-1?"cur":""}">${esc(l)}</div>`).join(""):"Waiting for a free worker…"}</div></div>`;

@@ -16,6 +16,7 @@ type Review struct {
 	// Filled by the pipeline, not the model.
 	Findings    []Finding    `json:"findings,omitempty"`
 	Design      *Design      `json:"design,omitempty"`
+	MergeRisk   *MergeRisk   `json:"merge_risk,omitempty"`
 	Attribution *Attribution `json:"attribution,omitempty"`
 	Pipeline    *Pipeline    `json:"pipeline,omitempty"`
 }
@@ -167,6 +168,7 @@ type Vote struct {
 // Pipeline describes how the review was produced (shown on the page).
 type Pipeline struct {
 	Depth        string                `json:"depth"`
+	DepthWhy     string                `json:"depthWhy,omitempty"` // why --depth auto picked this depth
 	Round        int                   `json:"round"`
 	Since        string                `json:"since,omitempty"` // previous reviewed sha for incremental rounds
 	Hunters      int                   `json:"hunters"`
@@ -190,6 +192,7 @@ type Pipeline struct {
 	CostUSD      float64               `json:"costUsd"`
 	Notice       string                `json:"notice,omitempty"`
 	DesignStats  *DesignStats          `json:"designStats,omitempty"`
+	RiskClaims   int                   `json:"riskClaims,omitempty"` // merge-risk claims sent to the voters
 	Errors       []string              `json:"errors,omitempty"`
 }
 

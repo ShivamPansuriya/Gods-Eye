@@ -282,6 +282,9 @@ func (r *Runner) run(ctx context.Context, rec *store.Review) error {
 	p := rv.Pipeline
 	rec.Round, rec.Verdict, rec.Units = p.Round, rv.Verdict, len(rv.Units)
 	rec.Bugs, rec.Minor, rec.CostUSD, rec.Seconds = p.Confirmed, p.Minor, p.CostUSD, p.Seconds
+	if rv.MergeRisk != nil {
+		rec.Risk = rv.MergeRisk.Overall
+	}
 	if rv.Design != nil {
 		for _, f := range rv.Design.Foundations.Items {
 			if f.Status == "confirmed" {
@@ -289,7 +292,7 @@ func (r *Runner) run(ctx context.Context, rec *store.Review) error {
 			}
 		}
 	}
-	r.logf(rec.ID, "Done: %d bugs, %d minor, %d design problems · $%.2f", rec.Bugs, rec.Minor, rec.Design, rec.CostUSD)
+	r.logf(rec.ID, "Done: %d bugs, %d minor, %d design problems · %s merge risk · $%.2f", rec.Bugs, rec.Minor, rec.Design, rec.Risk, rec.CostUSD)
 
 	if s.Comment {
 		var b bytes.Buffer
