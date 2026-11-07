@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"io"
 	"path"
+	"sort"
 	"strings"
 
 	"github.com/ShivamPansuriya/gods-eye/internal/diff"
@@ -193,6 +194,9 @@ func Markdown(w io.Writer, rep *Report) {
 	if len(r.WatchAfterDeploy) > 0 {
 		fmt.Fprintf(w, "<details><summary>Watch after deploy</summary>\n\n- %s\n</details>\n\n", strings.Join(r.WatchAfterDeploy, "\n- "))
 	}
+	if s := howReviewed(r); s != "" {
+		fmt.Fprintf(w, "<sub>%s</sub>\n\n", s)
+	}
 	switch {
 	case rep.Meta.ReviewURL != "":
 		fmt.Fprintf(w, "**[Open the full review →](%s)** <sub>architecture map, code flows, verified bugs, existing-design check</sub>\n", rep.Meta.ReviewURL)
@@ -223,4 +227,37 @@ func writeMergeRisk(w io.Writer, mr *review.MergeRisk) {
 		fmt.Fprintf(w, "\n*To lower the risk:* %s\n", strings.Join(mr.Lower, " "))
 	}
 	fmt.Fprintln(w)
+}
+
+// howReviewed is one line on what was hunted, what was left out, and what the
+// second engine and the voters added.
+func howReviewed(r *review.Review) string {
+	var parts []string
+	if sc := r.Scope; sc != nil {
+		parts = append(parts, fmt.Sprintf("📂 files reviewed: %d code, %d test", sc.Code, sc.Test))
+		if sc.Skipped > 0 {
+			var rs []string
+			for k, n := range sc.Reasons {
+				rs = append(rs, fmt.Sprintf("%s %d", k, n))
+			}
+			sort.Strings(rs)
+			parts = append(parts, fmt.Sprintf("skipped: %d (%s)", sc.Skipped, strings.Join(rs, ", ")))
+		}
+		if sc.Secret > 0 {
+			parts = append(parts, fmt.Sprintf("🔒 credential files never sent to the model: %d", sc.Secret))
+		}
+	}
+	if p := r.Pipeline; p != nil {
+		for _, e := range p.Engines {
+			if e.Status == "failed" {
+				parts = append(parts, e.Name+" did not run")
+				continue
+			}
+			parts = append(parts, fmt.Sprintf("2nd engine %s: %d reported, %d confirmed (%d only it found)", e.Name, e.Comments, e.Confirmed, e.Only))
+		}
+		if p.Suggestions > 0 {
+			parts = append(parts, fmt.Sprintf("🔧 one-click fixes: %d", p.Suggestions))
+		}
+	}
+	return strings.Join(parts, " · ")
 }

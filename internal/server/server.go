@@ -20,6 +20,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/v2/option"
 
 	"github.com/ShivamPansuriya/gods-eye/internal/github"
+	"github.com/ShivamPansuriya/gods-eye/internal/ocr"
 	"github.com/ShivamPansuriya/gods-eye/internal/render"
 	"github.com/ShivamPansuriya/gods-eye/internal/store"
 )
@@ -60,6 +61,7 @@ func New(dir string) (*Server, error) {
 		s.envKey = os.Getenv("CLAUDE_API_KEY")
 	}
 	s.Runner = NewRunner(st, s.config, s.anthropic)
+	s.Runner.APIKey = s.apiKey
 	return s, nil
 }
 
@@ -72,11 +74,16 @@ func (s *Server) config() store.Config {
 	return s.cfg
 }
 
-func (s *Server) anthropic() (anthropic.Client, bool) {
-	key := s.envKey
-	if key == "" {
-		key = s.config().AnthropicKey
+// apiKey is the Anthropic key from the environment, else the one in Settings.
+func (s *Server) apiKey() string {
+	if s.envKey != "" {
+		return s.envKey
 	}
+	return s.config().AnthropicKey
+}
+
+func (s *Server) anthropic() (anthropic.Client, bool) {
+	key := s.apiKey()
 	if key == "" && os.Getenv("ANTHROPIC_AUTH_TOKEN") == "" {
 		return anthropic.Client{}, false
 	}
@@ -206,6 +213,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	_, ok := s.anthropic()
 	out["anthropic"] = ok
 	out["anthropicFromEnv"] = s.envKey != ""
+	out["ocr"] = ocr.Find() != ""
 	if cfg.PublicURL != "" {
 		out["webhookUrl"] = strings.TrimRight(cfg.PublicURL, "/") + "/webhook/github"
 	}
@@ -389,6 +397,9 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if st.Budget <= 0 || st.Budget > 200 {
 		st.Budget = 15
+	}
+	if st.OCR != "off" {
+		st.OCR = ""
 	}
 	rp.Settings = st
 	_ = s.Store.SaveRepo(rp)

@@ -2,10 +2,11 @@ package server
 
 import (
 	"bytes"
+	"cmp"
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,9 +18,11 @@ import (
 
 	"github.com/ShivamPansuriya/gods-eye/internal/diff"
 	"github.com/ShivamPansuriya/gods-eye/internal/github"
+	"github.com/ShivamPansuriya/gods-eye/internal/ocr"
 	"github.com/ShivamPansuriya/gods-eye/internal/render"
 	"github.com/ShivamPansuriya/gods-eye/internal/review"
 	"github.com/ShivamPansuriya/gods-eye/internal/risk"
+	"github.com/ShivamPansuriya/gods-eye/internal/scope"
 	"github.com/ShivamPansuriya/gods-eye/internal/source"
 	"github.com/ShivamPansuriya/gods-eye/internal/store"
 	"github.com/ShivamPansuriya/gods-eye/internal/workspace"
@@ -30,6 +33,7 @@ type Runner struct {
 	Store     *store.Store
 	Anthropic func() (anthropic.Client, bool)
 	Config    func() store.Config
+	APIKey    func() string // the raw key, for the open-code-review engine
 
 	queue   chan string
 	mu      sync.Mutex
@@ -213,7 +217,8 @@ func (r *Runner) run(ctx context.Context, rec *store.Review) error {
 	if err != nil {
 		return fmt.Errorf("find merge base: %w", err)
 	}
-	raw, err := git(ctx, dir, "diff", "--no-color", "--no-ext-diff", strings.TrimSpace(mb), pull.Head.SHA)
+	mb = strings.TrimSpace(mb)
+	raw, err := git(ctx, dir, "diff", "--no-color", "--no-ext-diff", mb, pull.Head.SHA)
 	if err != nil {
 		return fmt.Errorf("diff: %w", err)
 	}
@@ -224,6 +229,13 @@ func (r *Runner) run(ctx context.Context, rec *store.Review) error {
 	if len(d.Hunks()) == 0 {
 		return errors.New("the PR has no changes to review")
 	}
+	// How the PR is reviewed comes from the base branch: a PR cannot exclude
+	// its own files or lower its own risk floor.
+	atBase := func(p string) (string, bool) {
+		s, err := git(ctx, dir, "show", mb+":"+p)
+		return s, err == nil
+	}
+	d, plan := review.Scope(d, scope.Load(atBase), atBase)
 
 	in := &source.Input{Repo: rec.Repo, Number: rec.PR, URL: pull.HTMLURL, Title: pull.Title, Body: pull.Body,
 		Author: pull.User.Login, BaseRef: pull.Base.Ref, HeadRef: pull.Head.Ref, HeadSHA: pull.Head.SHA, Guidance: map[string]string{}}
@@ -238,12 +250,12 @@ func (r *Runner) run(ctx context.Context, rec *store.Review) error {
 		}
 	}
 	for _, g := range []string{"REVIEW.md", "CLAUDE.md", "AGENTS.md", ".github/REVIEW.md"} {
-		if s, err := git(ctx, dir, "show", pull.Head.SHA+":"+g); err == nil {
+		if s, ok := atBase(g); ok {
 			in.Guidance[g] = s
 		}
 	}
 	rules := risk.Defaults
-	if s, err := git(ctx, dir, "show", pull.Head.SHA+":.godseye.json"); err == nil {
+	if s, ok := atBase(".godseye.json"); ok {
 		rules = risk.Parse([]byte(s))
 	}
 	ws, err := workspace.Open(dir, pull.Head.SHA)
@@ -260,7 +272,8 @@ func (r *Runner) run(ctx context.Context, rec *store.Review) error {
 	s := repo.Settings
 	r.logf(rec.ID, "Reviewing %d files, %d hunks · depth %s · effort %s", len(d.Files), len(d.Hunks()), s.Depth, s.Effort)
 	rv, err := review.Run(ctx, client, in, d, ws, rules, review.Options{
-		Model: cfg.Model, Effort: s.Effort, Depth: s.Depth, Budget: s.Budget, Prev: prev,
+		Model: cfg.Model, Effort: s.Effort, Depth: s.Depth, Budget: s.Budget, Prev: prev, Scope: plan,
+		OCR: r.ocrEngine(rec.ID, s, dir, mb, pull, github.GitAuthEnv(cfg.GitHubToken, hostPrefix(repo.CloneURL))),
 		Log: func(line string) {
 			if !strings.Contains(line, "submitted after") {
 				r.logf(rec.ID, "%s", strings.ReplaceAll(line, "\n", " · "))
@@ -311,6 +324,11 @@ func (r *Runner) run(ctx context.Context, rec *store.Review) error {
 			rec.CommentURL = u
 			r.logf(rec.ID, "Posted the review on the PR (%d line comments)", n)
 		}
+		if n, err := gh.ResolveThreads(ctx, rec.Repo, rec.PR, render.FixedThreads(rep)); err != nil {
+			r.logf(rec.ID, "Could not resolve the threads of fixed bugs: %v", err)
+		} else if n > 0 {
+			r.logf(rec.ID, "Resolved %d review threads whose bug is fixed", n)
+		}
 	}
 	return nil
 }
@@ -329,24 +347,18 @@ func (r *Runner) sync(ctx context.Context, rec *store.Review, repo store.Repo, t
 	defer m.Unlock()
 
 	dir := filepath.Join(r.Store.Dir, "clones", strings.ReplaceAll(repo.FullName, "/", "__"))
-	auth := []string{}
-	if token != "" && strings.HasPrefix(repo.CloneURL, "https://") {
-		basic := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + token))
-		auth = []string{"-c", "http.extraHeader=Authorization: Basic " + basic}
-	}
+	auth := github.GitAuthEnv(token, hostPrefix(repo.CloneURL)) // in the environment, not argv
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
 		r.logf(rec.ID, "Cloning %s (first review of this repo)", repo.FullName)
 		_ = os.MkdirAll(filepath.Dir(dir), 0o700)
-		args := append(append([]string{}, auth...), "clone", "--filter=blob:none", "--no-checkout", "--quiet", repo.CloneURL, dir)
-		if _, err := git(ctx, "", args...); err != nil {
+		if _, err := gitEnv(ctx, "", auth, "clone", "--filter=blob:none", "--no-checkout", "--quiet", repo.CloneURL, dir); err != nil {
 			return "", fmt.Errorf("clone: %w", err)
 		}
 	}
 	r.logf(rec.ID, "Fetching %s and PR head %s", pull.Base.Ref, short(pull.Head.SHA))
-	args := append(append([]string{}, auth...), "fetch", "--quiet", "origin",
+	if _, err := gitEnv(ctx, dir, auth, "fetch", "--quiet", "origin",
 		fmt.Sprintf("+refs/heads/%s:refs/remotes/origin/%s", pull.Base.Ref, pull.Base.Ref),
-		fmt.Sprintf("+refs/pull/%d/head:refs/remotes/pr/%d", rec.PR, rec.PR))
-	if _, err := git(ctx, dir, args...); err != nil {
+		fmt.Sprintf("+refs/pull/%d/head:refs/remotes/pr/%d", rec.PR, rec.PR)); err != nil {
 		return "", fmt.Errorf("fetch: %w", err)
 	}
 	if _, err := git(ctx, dir, "cat-file", "-e", pull.Head.SHA+"^{commit}"); err != nil {
@@ -356,11 +368,17 @@ func (r *Runner) sync(ctx context.Context, rec *store.Review, repo store.Repo, t
 }
 
 func git(ctx context.Context, dir string, args ...string) (string, error) {
+	return gitEnv(ctx, dir, nil, args...)
+}
+
+// gitEnv runs git with extra environment, such as credentials that must not
+// appear in argv.
+func gitEnv(ctx context.Context, dir string, env []string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	if dir != "" {
 		cmd.Dir = dir
 	}
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	cmd.Env = append(append(os.Environ(), "GIT_TERMINAL_PROMPT=0"), env...)
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	if err := cmd.Run(); err != nil {
@@ -381,4 +399,33 @@ func short(s string) string {
 		return s[:7]
 	}
 	return s
+}
+
+// ocrEngine returns open-code-review as a second engine, or nil when it is
+// turned off for the repo, not installed, or there is no raw API key.
+func (r *Runner) ocrEngine(id string, s store.RepoSettings, dir, mb string, pull github.Pull, env []string) review.OCRFunc {
+	if s.OCR == "off" || r.APIKey == nil {
+		return nil
+	}
+	bin, key := ocr.Find(), r.APIKey()
+	if bin == "" || key == "" {
+		if bin == "" {
+			r.logf(id, "open-code-review is not installed; reviewing with God's Eye's own hunters only")
+		}
+		return nil
+	}
+	return func(ctx context.Context, req review.OCRRequest) (*ocr.Result, error) {
+		return ocr.Run(ctx, ocr.Options{Bin: bin, Dir: dir, Base: cmp.Or(req.From, mb), Head: pull.Head.SHA, APIKey: key, Model: req.Model,
+			Effort: review.OCREffort(s.Effort), MaxTokens: req.MaxTokens, Exclude: req.Exclude, Background: pull.Title + "\n\n" + pull.Body,
+			Env: env, Timeout: 20 * time.Minute})
+	}
+}
+
+// hostPrefix is "https://host/" for an https clone URL, else "".
+func hostPrefix(cloneURL string) string {
+	u, err := url.Parse(cloneURL)
+	if err != nil || u.Scheme != "https" || u.Host == "" {
+		return ""
+	}
+	return "https://" + u.Host + "/"
 }

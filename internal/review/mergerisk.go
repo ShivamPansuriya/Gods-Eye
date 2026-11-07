@@ -6,6 +6,7 @@ import (
 
 	"github.com/ShivamPansuriya/gods-eye/internal/diff"
 	"github.com/ShivamPansuriya/gods-eye/internal/risk"
+	"github.com/ShivamPansuriya/gods-eye/internal/scope"
 	"github.com/ShivamPansuriya/gods-eye/internal/workspace"
 )
 
@@ -189,7 +190,7 @@ Finish by calling submit_verdict.`)
 // BuildMergeRisk scores the PR on five signals. Alignment, rollback and error
 // detection come from the architect's voted claims; impact and verification are
 // computed from the diff, the path rules and the units' proof.
-func BuildMergeRisk(r *Review, d *diff.Diff, rules []risk.Rule, verifyExit int, verifyCmd string) *MergeRisk {
+func BuildMergeRisk(r *Review, d *diff.Diff, rules []risk.Rule, plan *scope.Plan, verifyExit int, verifyCmd string) *MergeRisk {
 	var ri *RiskInput
 	if r.Design != nil && r.Design.Risk != nil {
 		ri = r.Design.Risk
@@ -240,7 +241,7 @@ func BuildMergeRisk(r *Review, d *diff.Diff, rules []risk.Rule, verifyExit int, 
 	lines, files := 0, 0
 	var paths []string
 	for _, f := range d.Files {
-		if skipHunt(f.Path) {
+		if plan.Of(f.Path).Kind != scope.Code {
 			continue
 		}
 		lines += f.Adds + f.Dels
@@ -452,11 +453,11 @@ func capFirst(s string) string {
 // AutoDepth picks the review depth from what changed: no reviewable code →
 // quick; sensitive paths or a large change → deep; otherwise standard.
 // In a re-review round only the files changed since the last round count.
-func AutoDepth(d *diff.Diff, rules []risk.Rule, only map[string]bool) (string, string) {
-	lines := codeLines(d, only)
+func AutoDepth(d *diff.Diff, rules []risk.Rule, only map[string]bool, plan *scope.Plan) (string, string) {
+	lines := codeLines(d, only, plan, scope.Code)
 	var paths []string
 	for _, f := range d.Files {
-		if skipHunt(f.Path) || f.Status == "binary" || (only != nil && !only[f.Path]) {
+		if k := plan.Of(f.Path).Kind; (k != scope.Code && k != scope.Test) || f.Status == "binary" || (only != nil && !only[f.Path]) {
 			continue
 		}
 		paths = append(paths, f.Path)
@@ -473,15 +474,24 @@ func AutoDepth(d *diff.Diff, rules []risk.Rule, only map[string]bool) (string, s
 	return "standard", fmt.Sprintf("%d changed lines of code, no sensitive paths", lines)
 }
 
-// codeLines counts changed lines in reviewable code (no docs, lockfiles or
-// binaries); with only set, just those files (a re-review round).
-func codeLines(d *diff.Diff, only map[string]bool) int {
+// codeLines counts changed lines in files of the given kinds (no docs,
+// lockfiles or binaries); with only set, just those files (a re-review round).
+func codeLines(d *diff.Diff, only map[string]bool, plan *scope.Plan, kinds ...scope.Kind) int {
 	n := 0
 	for _, f := range d.Files {
-		if skipHunt(f.Path) || f.Status == "binary" || (only != nil && !only[f.Path]) {
+		if !slicesContains(kinds, plan.Of(f.Path).Kind) || f.Status == "binary" || (only != nil && !only[f.Path]) {
 			continue
 		}
 		n += f.Adds + f.Dels
 	}
 	return n
+}
+
+func slicesContains[T comparable](xs []T, x T) bool {
+	for _, y := range xs {
+		if y == x {
+			return true
+		}
+	}
+	return false
 }

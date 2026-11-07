@@ -1,5 +1,7 @@
 package review
 
+import "github.com/ShivamPansuriya/gods-eye/internal/scope"
+
 // Review is the full result. The map stage fills title/eli5/units; the hunt and
 // verify stages fill Findings; Finalize/Merge tie them together.
 type Review struct {
@@ -14,11 +16,12 @@ type Review struct {
 	WatchAfterDeploy []string `json:"watch_after_deploy"`
 
 	// Filled by the pipeline, not the model.
-	Findings    []Finding    `json:"findings,omitempty"`
-	Design      *Design      `json:"design,omitempty"`
-	MergeRisk   *MergeRisk   `json:"merge_risk,omitempty"`
-	Attribution *Attribution `json:"attribution,omitempty"`
-	Pipeline    *Pipeline    `json:"pipeline,omitempty"`
+	Findings    []Finding      `json:"findings,omitempty"`
+	Design      *Design        `json:"design,omitempty"`
+	MergeRisk   *MergeRisk     `json:"merge_risk,omitempty"`
+	Attribution *Attribution   `json:"attribution,omitempty"`
+	Scope       *scope.Summary `json:"scope,omitempty"` // which files were hunted, skipped or kept from the model
+	Pipeline    *Pipeline      `json:"pipeline,omitempty"`
 }
 
 // Story explains the PR as a whole, before any unit.
@@ -128,26 +131,32 @@ type Loc struct {
 // Finding is a candidate bug from a hunter (or a not_done check), and what the
 // verifiers decided about it.
 type Finding struct {
-	ID         string `json:"id"`
-	Title      string `json:"title"`
-	File       string `json:"file"`
-	Line       int    `json:"line"`
-	Quote      string `json:"quote"`
-	Severity   string `json:"severity"` // important | minor | nit (after the vote)
-	Category   string `json:"category"`
-	Scenario   string `json:"scenario"`
-	Fix        string `json:"fix"`
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	File     string `json:"file"`
+	Line     int    `json:"line"`
+	EndLine  int    `json:"end_line,omitempty"` // last line the suggested fix replaces
+	Quote    string `json:"quote"`
+	Severity string `json:"severity"` // important | minor | nit (after the vote)
+	Category string `json:"category"`
+	Scenario string `json:"scenario"`
+	Fix      string `json:"fix"`
+	// Suggestion replaces lines Line..EndLine; it is posted as GitHub's
+	// one-click "Commit suggestion" only when the voters accept it (FixVerified).
+	Suggestion string `json:"suggestion,omitempty"`
 	BugClass   string `json:"bug_class"`
 	AlsoAt     []Loc  `json:"also_at"`
 	Confidence string `json:"confidence"`
 
-	Source string `json:"source"`         // hunter lens, or "check"
-	Hunk   string `json:"hunk,omitempty"` // hunk containing the line, if any
-	Unit   string `json:"unit,omitempty"`
-	InDiff bool   `json:"inDiff"` // the line is added or changed by this PR
+	Source  string   `json:"source"`            // hunter lens, "check", or "ocr" (Alibaba's open-code-review)
+	FoundBy []string `json:"foundBy,omitempty"` // every source that reported it, when several did
+	Hunk    string   `json:"hunk,omitempty"`    // hunk containing the line, if any
+	Unit    string   `json:"unit,omitempty"`
+	InDiff  bool     `json:"inDiff"` // the line is added or changed by this PR
 
-	Votes  []Vote `json:"votes,omitempty"`
-	Status string `json:"status"` // confirmed | rejected | nit | unverifiable | fixed | skipped
+	Votes       []Vote `json:"votes,omitempty"`
+	FixVerified bool   `json:"fixVerified,omitempty"` // most voters who found it real said the suggestion fixes it
+	Status      string `json:"status"`                // confirmed | rejected | nit | unverifiable | fixed | skipped
 	// Introduced is false when the verifiers judged the bug pre-existing.
 	Introduced bool   `json:"introduced"`
 	Round      int    `json:"round"`
@@ -163,6 +172,7 @@ type Vote struct {
 	Severity   string `json:"severity"`
 	Confidence string `json:"confidence"`
 	Reason     string `json:"reason"`
+	FixOK      bool   `json:"fix_ok"` // the suggested replacement fixes the bug and breaks nothing
 }
 
 // Pipeline describes how the review was produced (shown on the page).
@@ -192,13 +202,29 @@ type Pipeline struct {
 	CostUSD      float64               `json:"costUsd"`
 	Notice       string                `json:"notice,omitempty"`
 	DesignStats  *DesignStats          `json:"designStats,omitempty"`
-	RiskClaims   int                   `json:"riskClaims,omitempty"` // merge-risk claims sent to the voters
-	Budget       float64               `json:"budget,omitempty"`     // spend limit used for this review (USD)
-	BudgetWhy    string                `json:"budgetWhy,omitempty"`  // how it was sized
-	Gaps         []Gap                 `json:"gaps,omitempty"`       // work not finished, shown in the verdict
-	Summarized   []string              `json:"summarized,omitempty"` // where agents saw a summary instead of the full diff
+	RiskClaims   int                   `json:"riskClaims,omitempty"`  // merge-risk claims sent to the voters
+	Budget       float64               `json:"budget,omitempty"`      // spend limit used for this review (USD)
+	BudgetWhy    string                `json:"budgetWhy,omitempty"`   // how it was sized
+	Gaps         []Gap                 `json:"gaps,omitempty"`        // work not finished, shown in the verdict
+	Summarized   []string              `json:"summarized,omitempty"`  // where agents saw a summary instead of the full diff
+	Engines      []EngineRun           `json:"engines,omitempty"`     // outside review engines that also hunted
+	VotesSaved   int                   `json:"votesSaved,omitempty"`  // third votes skipped: two voters already rejected the claim
+	Suggestions  int                   `json:"suggestions,omitempty"` // confirmed bugs with a fix the voters accepted
 	Incomplete   bool                  `json:"incomplete,omitempty"`
 	Errors       []string              `json:"errors,omitempty"`
+}
+
+// EngineRun is how an outside engine (Alibaba's open-code-review) did as one more hunter.
+type EngineRun struct {
+	Name      string  `json:"name"`
+	Status    string  `json:"status"` // complete | partial | failed
+	Files     int     `json:"files"`
+	Comments  int     `json:"comments"`  // what it reported
+	Confirmed int     `json:"confirmed"` // of those, confirmed by the voters
+	Only      int     `json:"only"`      // confirmed findings no God's Eye hunter reported
+	Seconds   float64 `json:"seconds"`
+	CostUSD   float64 `json:"costUsd"`
+	Note      string  `json:"note,omitempty"`
 }
 
 // StageUsage mirrors agent.StageUsage for the report.

@@ -16,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ShivamPansuriya/gods-eye/internal/scope"
 )
 
 // Limits keep tool results small enough to be useful in a prompt.
@@ -76,6 +78,9 @@ func (w *Workspace) Lines(p string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	if scope.IsSecret(c) {
+		return nil, fmt.Errorf("%s is a credential file; it is never shown to the review", c)
+	}
 	w.mu.Lock()
 	if ls, ok := w.files[c]; ok {
 		w.mu.Unlock()
@@ -98,6 +103,9 @@ func (w *Workspace) Lines(p string) ([]string, error) {
 		}
 		if !strings.HasPrefix(real, w.Root+string(os.PathSeparator)) {
 			return nil, errors.New("path escapes the repository")
+		}
+		if rel, err := filepath.Rel(w.Root, real); err != nil || scope.IsSecret(filepath.ToSlash(rel)) {
+			return nil, fmt.Errorf("%s is a credential file; it is never shown to the review", c)
 		}
 		data, err = os.ReadFile(real)
 		if err != nil {
@@ -181,9 +189,13 @@ func (w *Workspace) Grep(pattern, glob string) string {
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
 	total := 0
 	for sc.Scan() {
+		line := strings.TrimPrefix(sc.Text(), prefix)
+		if file, _, ok := strings.Cut(line, ":"); ok && scope.IsSecret(file) {
+			continue
+		}
 		total++
 		if n < MaxGrepHits {
-			b.WriteString(clip(strings.TrimPrefix(sc.Text(), prefix)))
+			b.WriteString(clip(line))
 			b.WriteByte('\n')
 			n++
 		}

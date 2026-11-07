@@ -244,6 +244,15 @@ button.ev:hover{border-color:var(--iris)}
 .bug p{margin:3px 0 0;color:var(--muted);font-size:14px}
 .bug .fix{color:var(--ink)}
 .bug .meta{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;margin-top:8px;font-size:12px;color:var(--faint)}
+.by{font:600 10.5px/1 var(--mono);letter-spacing:.04em;padding:4px 7px;border-radius:5px;background:var(--side);color:var(--muted)}
+.by.both{background:var(--ok-bg);color:var(--ok)}
+.sugg{margin:8px 0 0;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.sugg .h{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;padding:6px 10px;font-size:12px;color:var(--muted);background:var(--side)}
+.sugg .h b{color:var(--ok);font-weight:600}
+.sugg pre{margin:0;padding:8px 10px;font:12.5px/1.5 var(--mono);tab-size:4;overflow-x:auto;background:var(--ok-bg);color:var(--ink)}
+.scopelist{margin:6px 0 0;display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:4px 12px;font-size:13px}
+.scopelist .p{font-family:var(--mono);font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.scopelist .r{color:var(--muted)}
 .votes{display:inline-flex;gap:3px;align-items:center}
 .votes i{width:8px;height:8px;border-radius:2px;background:var(--line)}
 .votes i.y{background:var(--ok)} .votes i.n{background:var(--bad)}
@@ -563,6 +572,7 @@ function renderStory(){
 
   h += findingsSection();
   h += `<div class="grid2"><div class="card"><h3>Not checked by anyone</h3>${list(R.not_checked)}</div><div class="card"><h3>Watch after deploy</h3>${list(R.watch_after_deploy)}</div></div>`;
+  h += scopeCard();
   if (PIPE) h += pipeCard();
   h += `<p class="kbd">Keys: j / k move · a looks right · c needs change · q ask author · 1-4 views · s summary</p>`;
   $("#main").innerHTML = h;
@@ -602,9 +612,16 @@ function bugRow(f, opts){
   const loc = f.hunk ? `<button class="ev" data-jump="${f.hunk}" data-line="${f.line}" data-unit="${esc(f.unit||"")}"><b>${esc(f.id)}</b>${esc(f.file.split("/").pop())}:${f.line}</button>` : `<span class="ev"><b>${esc(f.id)}</b>${esc(f.file.split("/").pop())}:${f.line}</span>`;
   const unit = opts.unitLink && f.unit ? `<a href="#${esc(f.unit)}">${esc((units.find(u=>u.id===f.unit)||{}).title||f.unit)}</a>` : "";
   const also = (f.also_at||[]).length ? `<span>same pattern at ${f.also_at.map(a=>esc(a.file.split("/").pop()+":"+a.line)).join(", ")}</span>` : "";
-  const body = cls==="dismissed" ? `<p>${esc(f.why||"")}</p>` : `<p>${esc(f.scenario)}</p>${f.fix?`<p class="fix">Fix: ${esc(f.fix)}</p>`:""}`;
+  const sugg = f.suggestion && f.fixVerified && cls!=="dismissed" ? `<div class="sugg"><div class="h"><b>✔ Fix checked by the verifiers</b><span>replaces line${f.end_line>f.line?`s ${f.line}–${f.end_line}`:` ${f.line}`} · one-click “Commit suggestion” on the PR</span></div><pre>${esc(f.suggestion)}</pre></div>` : "";
+  const body = cls==="dismissed" ? `<p>${esc(f.why||"")}</p>` : `<p>${esc(f.scenario)}</p>${f.fix?`<p class="fix">Fix: ${esc(f.fix)}</p>`:""}${sugg}`;
   const ag = (cls==="important"||cls==="minor") ? `<span class="agree"><button class="y ${agree[f.id]==="y"?"on":""}" data-agree="${f.id}" data-v="y">Agree</button><button class="n ${agree[f.id]==="n"?"on":""}" data-agree="${f.id}" data-v="n">Not a bug</button></span>` : "";
-  return `<div class="bug"><span class="sev ${cls}">${lbl}</span><div><b>${esc(f.title)}</b>${body}<div class="meta">${loc}${voteDots(f)}${unit}${also}${ag}</div></div></div>`;
+  return `<div class="bug"><span class="sev ${cls}">${lbl}</span><div><b>${esc(f.title)}</b>${body}<div class="meta">${loc}${foundBy(f)}${voteDots(f)}${unit}${also}${ag}</div></div></div>`;
+}
+function foundBy(f){
+  const all = (f.foundBy||[]).length ? f.foundBy : [f.source];
+  const ocr = all.includes("ocr"), own = all.some(s => s && s!=="ocr" && s!=="check");
+  if (ocr && own) return `<span class="by both" title="Found independently by God's Eye's hunters and by Alibaba's open-code-review">both engines</span>`;
+  return ocr ? `<span class="by" title="Found by Alibaba's open-code-review, verified by God's Eye">open-code-review</span>` : "";
 }
 function grouped(fs, opts){
   const byClass = {}; fs.forEach(f => (byClass[(f.bug_class||"").toLowerCase()] ||= []).push(f));
@@ -634,10 +651,23 @@ function findingsSection(){
   }
   return h;
 }
+function scopeCard(){
+  const s = R.scope; if (!s) return "";
+  const icon = {secret:"🔒", skip:"⏭", test:"🧪", code:"📋"};
+  const why = f => f.kind==="secret" ? "credential file: never sent to the model" : f.kind==="test" ? "reviewed by the tests lens" + (f.checklist?` · checklist ${f.checklist}`:"") : f.kind==="code" ? `checklist ${f.checklist}` : f.reason;
+  const cl = Object.entries(s.checklists||{}).sort((a,b)=>b[1]-a[1]).map(([k,n])=>`${esc(k)} ×${n}`).join(" · ");
+  const other = (s.files||[]).filter(f=>f.kind!=="code");
+  let h = `<div class="card"><h3>What was reviewed<span>${s.code} code · ${s.test} tests · ${s.skipped} skipped${s.secret?` · ${s.secret} kept from the model`:""}</span></h3>`;
+  if (cl) h += `<p class="kbd" style="margin:0">Language checklists given to the hunters: ${cl}</p>`;
+  if (other.length) h += `<details class="more"><summary>Skipped and protected files (${other.length})</summary><div class="scopelist">${other.map(f=>`<span>${icon[f.kind]||"·"}</span><span class="p" title="${esc(f.path)}">${esc(f.path)}</span><span class="r">${esc(why(f)||"")}</span>`).join("")}</div></details>`;
+  return h + `</div>`;
+}
 function pipeCard(){
   const p = PIPE, u = p.usage||{};
   let h = `<div class="card"><h3>How this review was made<span>${esc(p.depth)} · round ${p.round}${p.since?` · since ${esc(p.since.slice(0,7))}`:""}</span></h3>`;
   h += `<div class="pipe"><span><span class="n">${p.hunters}</span> bug hunters</span>→<span><span class="n">${p.candidates}</span> candidates</span>→<span><span class="n">${p.duplicates}</span> merged · <span class="n">${p.unverifiable}</span> dropped (quoted code not found)${p.outsideDelta?` · <span class="n">${p.outsideDelta}</span> outside the new commits`:""}</span>→<span><span class="n">${p.voters}</span> verifiers each</span>→<span><span class="n">${p.confirmed}</span> bugs · <span class="n">${p.minor||0}</span> minor · <span class="n">${p.preExisting}</span> pre-existing · <span class="n">${p.rejected+p.nits}</span> dismissed</span></div>`;
+  (p.engines||[]).forEach(e => { h += `<p class="kbd" style="margin:10px 0 0">Second engine <b>${esc(e.name)}</b> (Alibaba): ${e.status==="failed" ? `did not run: ${esc(e.note||"")}` : `${e.files} files · ${e.comments} reported → <b>${e.confirmed}</b> confirmed by the same verifiers (${e.only} only it found) · ${Math.round(e.seconds/6)/10} min · $${(e.costUsd||0).toFixed(2)}${e.status==="partial"?` · partial: ${esc(e.note||"")}`:""}`}</p>` });
+  if (p.votesSaved || p.suggestions) h += `<p class="kbd" style="margin:6px 0 0">${p.suggestions?`${p.suggestions} bugs come with a fix the verifiers checked`:""}${p.votesSaved&&p.suggestions?" · ":""}${p.votesSaved?`${p.votesSaved} third votes skipped: two verifiers had already rejected the claim`:""}</p>`;
   if (p.symbols) h += `<p class="kbd" style="margin:10px 0 0">Callers of ${p.symbols} changed symbols looked up with git grep${p.verifyCmd?` · ran ${esc(p.verifyCmd)} (exit ${p.verifyExit})`:""}${p.seconds?` · ${Math.round(p.seconds/6)/10} min`:""}</p>`;
   const rows = Object.entries(u).sort();
   if (rows.length) {

@@ -14,6 +14,7 @@ import (
 	"github.com/ShivamPansuriya/gods-eye/internal/agent"
 	"github.com/ShivamPansuriya/gods-eye/internal/diff"
 	"github.com/ShivamPansuriya/gods-eye/internal/risk"
+	"github.com/ShivamPansuriya/gods-eye/internal/scope"
 	"github.com/ShivamPansuriya/gods-eye/internal/source"
 	"github.com/ShivamPansuriya/gods-eye/internal/workspace"
 )
@@ -28,7 +29,12 @@ type Options struct {
 	Budget    float64 // base spend limit (USD); scaled with PR size, 45% held back for checking
 	VerifyCmd string  // optional command whose output is evidence (tests, build)
 	Prev      *State  // previous round, for incremental re-review
-	Log       func(string)
+	// Scope says which files are hunted, which checklists apply, and which
+	// files are secrets; nil means the built-in rules (see review.Scope).
+	Scope *scope.Plan
+	// OCR, when set, runs Alibaba's open-code-review as one more hunter.
+	OCR OCRFunc
+	Log func(string)
 }
 
 // No agent reads more than a bounded view of the diff, so a PR of any size is
@@ -46,6 +52,14 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 	t0 := time.Now()
 	opt.defaults()
 	log := opt.Log
+	if opt.Scope == nil {
+		d, opt.Scope = Scope(d, scope.Config{}, nil)
+	} else {
+		d = withoutSecrets(d, opt.Scope)
+	}
+	plan := opt.Scope
+	sum := plan.Summary()
+	log(fmt.Sprintf("Scope: %d code files, %d test files, %d skipped, %d credential files kept from the model", sum.Code, sum.Test, sum.Skipped, sum.Secret))
 	pipe := &Pipeline{Depth: opt.Depth, Round: 1, Workspace: ws != nil}
 	fullChars := len(d.Annotated())
 	annotated, summarized := d.Overview(WholeViewChars)
@@ -81,6 +95,7 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 		pipe.Round, pipe.Since = p.Round+1, p.HeadSHA
 		if raw, err := ws.DiffRange(p.HeadSHA, in.HeadSHA); err == nil {
 			if dd, err := diff.Parse(raw); err == nil {
+				dd = withoutSecrets(dd, plan)
 				deltaFiles = map[string]bool{}
 				deltaRanges = map[string][][2]int{}
 				for _, f := range dd.Files {
@@ -92,28 +107,17 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 				deltaText = clip(dd.Annotated(), 30000)
 			}
 		}
-		for _, f := range p.Findings {
-			if f.Status != "confirmed" {
-				continue
-			}
-			if _, ok := ws.Contains(f.File, f.Quote); ok {
-				carried = append(carried, f) // still there
-			} else {
-				f.Status, f.Why = "fixed", "the quoted code is gone at the new head"
-				carried = append(carried, f)
-				pipe.Fixed++
-			}
-		}
+		carried, pipe.Fixed = carryForward(ws, p.Findings)
 		log(fmt.Sprintf("Round %d: %d files changed since %s; %d earlier findings fixed", pipe.Round, len(deltaFiles), shortSHA(p.HeadSHA), pipe.Fixed))
 	}
 
 	// 3b. Depth: "auto" spends review effort where the change needs it.
 	if opt.Depth == "auto" {
-		opt.Depth, pipe.DepthWhy = AutoDepth(d, rules, deltaFiles)
+		opt.Depth, pipe.DepthWhy = AutoDepth(d, rules, deltaFiles, plan)
 		log(fmt.Sprintf("Depth %s: %s", opt.Depth, pipe.DepthWhy))
 	}
 	pipe.Depth = opt.Depth
-	opt.Budget, pipe.BudgetWhy = ScaleBudget(opt.Budget, codeLines(d, deltaFiles))
+	opt.Budget, pipe.BudgetWhy = ScaleBudget(opt.Budget, codeLines(d, deltaFiles, plan, scope.Code, scope.Test))
 	pipe.Budget = opt.Budget
 	preCap := huntCap(opt.Budget)
 	log(fmt.Sprintf("Budget $%.2f (%s); mapping, design and hunting may use $%.2f, the rest is kept for checking", opt.Budget, pipe.BudgetWhy, preCap))
@@ -195,11 +199,10 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 
 	// 5. Hunters, in parallel, over slices of the diff.
 	var (
-		cands     []Finding
-		lenses    = []Lens{LensAll}
-		known     []string
-		huntSlcs  [][]string
-		huntFiles []map[string]bool
+		cands  []Finding
+		lenses = []Lens{LensAll}
+		known  []string
+		hunts  []huntSlice
 	)
 	if opt.Depth == "deep" {
 		lenses = []Lens{LensLogic, LensContract}
@@ -210,31 +213,39 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 		}
 	}
 	if opt.Depth != "quick" {
-		nSlices := min(MaxSlices, max(10, (fullChars+SliceChars-1)/SliceChars))
-		huntSlcs, huntFiles = slices(d, deltaFiles, nSlices)
-		pipe.Hunters = len(huntSlcs) * len(lenses)
-		log(fmt.Sprintf("Hunting with %d agents (%d slices × %d lens)", pipe.Hunters, len(huntSlcs), len(lenses)))
-		for si, sl := range huntSlcs {
-			for _, l := range lenses {
-				wg.Add(1)
-				go func(si int, sl []string, l Lens) {
-					defer wg.Done()
+		hunts = huntPlan(d, plan, deltaFiles, lenses)
+		nCode, nTest := 0, 0
+		for _, h := range hunts {
+			if h.lens == LensTests {
+				nTest++
+			} else {
+				nCode++
+			}
+		}
+		pipe.Hunters = len(hunts)
+		log(fmt.Sprintf("Hunting with %d agents (%d on code, %d on tests)", pipe.Hunters, nCode, nTest))
+		for si, h := range hunts {
+			wg.Add(1)
+			go func(si int, h huntSlice) {
+				defer wg.Done()
+				{
+					l, sl := h.lens, h.desc
 					label := fmt.Sprintf("hunt-%d-%s", si+1, l.Name)
-					files := fmt.Sprintf("%d file(s)", len(huntFiles[si]))
+					files := fmt.Sprintf("%d file(s)", len(h.files))
 					if overPre() {
 						mu.Lock()
 						gap("hunt", fmt.Sprintf("slice %d (%s, %s lens) not searched for bugs", si+1, files, l.Name), "hunting share of the budget spent")
 						mu.Unlock()
 						return
 					}
-					view, partial := d.Only(huntFiles[si]).Overview(SliceChars)
+					view, partial := d.Only(h.files).Overview(SliceChars)
 					if partial > 0 {
 						mu.Lock()
 						pipe.Summarized = append(pipe.Summarized, fmt.Sprintf("Hunter slice %d (%s lens) saw %d large file(s) as a summary and read them on demand.", si+1, l.Name, partial))
 						mu.Unlock()
 					}
 					raw, err := runner.Run(ctx, agent.Task{Stage: "hunt", Label: label, Context: diffBlock(view, "your slice"),
-						Prompt: huntTask(l, sl, deltaText, known), Submit: "submit_findings", MaxTurns: 14, Over: overPre})
+						Prompt: huntTask(l, sl, deltaText, known, checklistsFor(plan, h.files)), Submit: "submit_findings", MaxTurns: 14, Over: overPre})
 					var out struct {
 						Findings []Finding `json:"findings"`
 					}
@@ -254,9 +265,49 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 						cands = append(cands, f)
 					}
 					log(fmt.Sprintf("%s: %d findings", label, len(out.Findings)))
-				}(si, sl, l)
-			}
+				}
+			}(si, h)
 		}
+	}
+
+	// 5b. Alibaba's open-code-review as one more hunter: its own prompts, file
+	// grouping and language rules over the same range (only the new commits
+	// in a re-review round). Its comments are verified like any hunter's.
+	var ocrRun *EngineRun
+	if opt.OCR != nil && opt.Depth != "quick" {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			from := ""
+			if pipe.Round > 1 {
+				from = pipe.Since
+			}
+			maxTok := int64(OCRShare * preCap / ocrUSDPerMTokens * 1e6)
+			log(fmt.Sprintf("open-code-review: hunting with Alibaba's engine (up to %dk tokens)", maxTok/1000))
+			res, err := opt.OCR(ctx, OCRRequest{From: from, Model: opt.Model, MaxTokens: maxTok, Exclude: plan.Excluded()})
+			mu.Lock()
+			defer mu.Unlock()
+			run := &EngineRun{Name: "open-code-review"}
+			ocrRun = run
+			if err != nil {
+				run.Status, run.Note = "failed", clampWords(err.Error(), 25)
+				errs = append(errs, "open-code-review: "+err.Error())
+				log("open-code-review failed: " + err.Error())
+				return
+			}
+			meter.Add("ocr", opt.Model, anthropic.BetaUsage{
+				InputTokens:              max(0, res.Usage.Input-res.Usage.CacheRead-res.Usage.CacheWrite),
+				CacheCreationInputTokens: res.Usage.CacheWrite, CacheReadInputTokens: res.Usage.CacheRead,
+				OutputTokens: res.Usage.Output,
+			}, res.Elapsed)
+			run.Status, run.Files, run.Comments, run.Seconds = "complete", res.Files, len(res.Comments), res.Elapsed.Seconds()
+			if res.Status != "" && res.Status != "complete" {
+				run.Status, run.Note = "partial", clampWords(res.Message, 25)
+			}
+			fs := hunted(fromOCR(res.Comments, pipe.Round), plan)
+			cands = append(cands, fs...)
+			log(fmt.Sprintf("open-code-review: %d findings in %d files (%s)", len(fs), res.Files, res.Elapsed.Round(time.Second)))
+		}()
 	}
 	wg.Wait()
 	if mapErr != nil {
@@ -290,10 +341,15 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 	// 7. Discard findings whose quoted code does not exist; place the rest.
 	var kept []Finding
 	for _, f := range cands {
+		line := f.Line
 		if !placeFinding(&f, d, ws) {
 			pipe.Unverifiable++
 			continue
 		}
+		if f.EndLine > 0 {
+			f.EndLine += f.Line - line
+		}
+		checkSuggestion(&f, d)
 		// Re-review rounds only take findings in code that changed since the
 		// last round; otherwise every round "finds" a few more old issues and
 		// the review never converges.
@@ -304,7 +360,8 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 		kept = append(kept, f)
 	}
 	kept, dups := dedupe(kept)
-	pipe.Duplicates = dups
+	kept, again := withoutKnown(kept, carried)
+	pipe.Duplicates = dups + again
 	for i := range kept {
 		kept[i].ID = fmt.Sprintf("F%d", i+1)
 	}
@@ -323,7 +380,10 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 		}
 	}
 
-	// 8. Independent verification by vote.
+	// 8. Independent verification by vote. Two voters go first; the third runs
+	// only when it can change the outcome. A claim needs a strict majority of
+	// all three, so after two "not real" votes it is rejected whatever the
+	// third says.
 	voters, voteFails := 0, 0
 	if opt.Depth != "quick" {
 		voters = len(VerifyLenses)
@@ -334,37 +394,72 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 		nDesign = len(design.Foundations.Items)
 	}
 	if voters > 0 && len(kept)+nDesign+len(riskClaims) > 0 {
-		log(fmt.Sprintf("Verifying %d findings, %d design claims and %d merge-risk claims with %d independent voters each", len(kept), nDesign, len(riskClaims), voters))
+		log(fmt.Sprintf("Verifying %d findings, %d design claims and %d merge-risk claims with up to %d independent voters each", len(kept), nDesign, len(riskClaims), voters))
 		sort.SliceStable(kept, func(a, b int) bool { return confRank(kept[a].Confidence) > confRank(kept[b].Confidence) })
 		var vwg sync.WaitGroup
+		// prompts builds each voter's task up front, before any vote is added.
+		prompts := func(task func(Lens) string) []string {
+			ps := make([]string, voters)
+			for i, l := range VerifyLenses[:voters] {
+				ps[i] = task(l)
+			}
+			return ps
+		}
+		// vote runs the voters for one claim; votes returns the claim's votes so far.
+		vote := func(id string, ps []string, add func(Vote), votes func() []Vote) {
+			defer vwg.Done()
+			one := func(i int) {
+				l := VerifyLenses[i]
+				raw, err := runner.Run(ctx, agent.Task{Stage: "verify", Label: "verify-" + id + "-" + l.Name,
+					Prompt: ps[i], Submit: "submit_verdict", MaxTurns: 6, Effort: opt.VerifyEff})
+				var v Vote
+				if err == nil {
+					err = json.Unmarshal(raw, &v)
+				}
+				mu.Lock()
+				defer mu.Unlock()
+				if err != nil {
+					errs = append(errs, err.Error())
+					voteFails++
+					return
+				}
+				v.Lens = l.Name
+				add(v)
+			}
+			first := min(2, voters)
+			var w sync.WaitGroup
+			for i := range first {
+				w.Add(1)
+				go func(i int) { defer w.Done(); one(i) }(i)
+			}
+			w.Wait()
+			mu.Lock()
+			real := 0
+			for _, v := range votes() {
+				if v.Real {
+					real++
+				}
+			}
+			mu.Unlock()
+			if (real+voters-first)*2 <= voters {
+				mu.Lock()
+				pipe.VotesSaved += voters - first
+				mu.Unlock()
+				return
+			}
+			for i := first; i < voters; i++ {
+				one(i)
+			}
+		}
 		for i := range kept {
 			if meter.Total().CostUSD > opt.Budget {
 				kept[i].Status, kept[i].Why = "skipped", fmt.Sprintf("budget of $%.0f reached", opt.Budget)
 				continue
 			}
-			for _, l := range VerifyLenses[:voters] {
-				vwg.Add(1)
-				go func(f *Finding, l Lens) {
-					defer vwg.Done()
-					raw, err := runner.Run(ctx, agent.Task{Stage: "verify", Label: "verify-" + f.ID + "-" + l.Name,
-						Prompt: verifyTask(l, *f, hunkText(byID[f.Hunk])), Submit: "submit_verdict", MaxTurns: 6, Effort: opt.VerifyEff})
-					mu.Lock()
-					defer mu.Unlock()
-					if err != nil {
-						errs = append(errs, err.Error())
-						voteFails++
-						return
-					}
-					var v Vote
-					if err := json.Unmarshal(raw, &v); err != nil {
-						errs = append(errs, err.Error())
-						voteFails++
-						return
-					}
-					v.Lens = l.Name
-					f.Votes = append(f.Votes, v)
-				}(&kept[i], l)
-			}
+			f := &kept[i]
+			vwg.Add(1)
+			go vote(f.ID, prompts(func(l Lens) string { return verifyTask(l, *f, hunkText(byID[f.Hunk])) }),
+				func(v Vote) { f.Votes = append(f.Votes, v) }, func() []Vote { return f.Votes })
 		}
 		// Claims about the existing design go through the same vote.
 		if design != nil {
@@ -377,26 +472,9 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 					f.Status, f.Why = "skipped", fmt.Sprintf("budget of $%.0f reached", opt.Budget)
 					continue
 				}
-				for _, l := range VerifyLenses[:voters] {
-					vwg.Add(1)
-					go func(f *Foundation, l Lens) {
-						defer vwg.Done()
-						raw, err := runner.Run(ctx, agent.Task{Stage: "verify", Label: "verify-" + f.ID + "-" + l.Name,
-							Prompt: verifyFoundationTask(l, *f), Submit: "submit_verdict", MaxTurns: 6, Effort: opt.VerifyEff})
-						mu.Lock()
-						defer mu.Unlock()
-						if err != nil {
-							errs = append(errs, err.Error())
-							voteFails++
-							return
-						}
-						var v Vote
-						if json.Unmarshal(raw, &v) == nil {
-							v.Lens = l.Name
-							f.Votes = append(f.Votes, v)
-						}
-					}(f, l)
-				}
+				vwg.Add(1)
+				go vote(f.ID, prompts(func(l Lens) string { return verifyFoundationTask(l, *f) }),
+					func(v Vote) { f.Votes = append(f.Votes, v) }, func() []Vote { return f.Votes })
 			}
 		}
 		// Merge-risk claims (drive-by edits, one-way doors, swallowed errors) too.
@@ -405,30 +483,16 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 				c.Status = "skipped"
 				continue
 			}
-			for _, l := range VerifyLenses[:voters] {
-				vwg.Add(1)
-				go func(c *RiskClaim, l Lens) {
-					defer vwg.Done()
-					raw, err := runner.Run(ctx, agent.Task{Stage: "verify", Label: "verify-" + c.ID + "-" + l.Name,
-						Prompt: verifyRiskTask(l, *c), Submit: "submit_verdict", MaxTurns: 6, Effort: opt.VerifyEff})
-					mu.Lock()
-					defer mu.Unlock()
-					if err != nil {
-						errs = append(errs, err.Error())
-						voteFails++
-						return
-					}
-					var v Vote
-					if json.Unmarshal(raw, &v) == nil {
-						v.Lens = l.Name
-						c.Votes = append(c.Votes, v)
-					}
-				}(c, l)
-			}
+			vwg.Add(1)
+			go vote(c.ID, prompts(func(l Lens) string { return verifyRiskTask(l, *c) }),
+				func(v Vote) { c.Votes = append(c.Votes, v) }, func() []Vote { return c.Votes })
 		}
 		vwg.Wait()
 		if voteFails > 0 {
 			gap("verify", fmt.Sprintf("%d verifier call(s) failed", voteFails), "those claims were judged on fewer votes, and a missing vote counts against them")
+		}
+		if pipe.VotesSaved > 0 {
+			log(fmt.Sprintf("Skipped %d third votes on claims two voters had already rejected", pipe.VotesSaved))
 		}
 	}
 	for _, c := range riskClaims {
@@ -441,6 +505,22 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 	}
 	for i := range kept {
 		tally(&kept[i], voters)
+		if kept[i].FixVerified {
+			pipe.Suggestions++
+		}
+	}
+	if ocrRun != nil {
+		ocrRun.CostUSD = meter.Snapshot()["ocr"].CostUSD
+		for _, f := range kept {
+			if f.Status != "confirmed" || (f.Source != "ocr" && !slicesContains(f.FoundBy, "ocr")) {
+				continue
+			}
+			ocrRun.Confirmed++
+			if len(f.FoundBy) == 0 {
+				ocrRun.Only++
+			}
+		}
+		pipe.Engines = append(pipe.Engines, *ocrRun)
 	}
 
 	// 9. Put it together.
@@ -449,7 +529,8 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 	Merge(r, d, all)
 	r.Design = design
 	AttachDesignUnits(r)
-	r.MergeRisk = BuildMergeRisk(r, d, rules, pipe.VerifyExit, pipe.VerifyCmd)
+	r.MergeRisk = BuildMergeRisk(r, d, rules, plan, pipe.VerifyExit, pipe.VerifyCmd)
+	r.Scope = sum
 	att := DetectAttribution(in.Body + "\n" + strings.Join(in.Commits, "\n"))
 	r.Attribution = &att
 	for _, f := range r.Findings {
@@ -520,9 +601,41 @@ func (o *Options) defaults() {
 	}
 }
 
-// slices groups reviewable files into at most n balanced slices, keeping diff
-// order so related files stay together. With only set, files outside it are skipped.
-func slices(d *diff.Diff, only map[string]bool, n int) ([][]string, []map[string]bool) {
+// huntSlice is one hunter's share of the PR: its files and the lens it uses.
+type huntSlice struct {
+	desc  []string
+	files map[string]bool
+	lens  Lens
+}
+
+// MaxTestSlices bounds the hunters spent on tests: they find real problems
+// (dates that expire, flaky timing), but rarely blocking ones.
+const MaxTestSlices = 3
+
+// huntPlan splits the hunted files into slices: code files for each lens, and
+// test files for the tests lens. With only set, just those files (a re-review).
+func huntPlan(d *diff.Diff, plan *scope.Plan, only map[string]bool, lenses []Lens) []huntSlice {
+	var out []huntSlice
+	code := intersect(plan.Paths(scope.Code), only)
+	nCode := min(MaxSlices, max(10, (len(d.Only(code).Annotated())+SliceChars-1)/SliceChars))
+	descs, files := slices(d, code, nCode)
+	for i := range descs {
+		for _, l := range lenses {
+			out = append(out, huntSlice{descs[i], files[i], l})
+		}
+	}
+	tests := intersect(plan.Paths(scope.Test), only)
+	nTest := min(MaxTestSlices, max(1, (len(d.Only(tests).Annotated())+SliceChars-1)/SliceChars))
+	descs, files = slices(d, tests, nTest)
+	for i := range descs {
+		out = append(out, huntSlice{descs[i], files[i], LensTests})
+	}
+	return out
+}
+
+// slices groups the given files into at most n balanced slices, keeping diff
+// order so related files stay together.
+func slices(d *diff.Diff, set map[string]bool, n int) ([][]string, []map[string]bool) {
 	type item struct {
 		desc  string
 		path  string
@@ -531,7 +644,7 @@ func slices(d *diff.Diff, only map[string]bool, n int) ([][]string, []map[string
 	var items []item
 	total := 0
 	for _, f := range d.Files {
-		if skipHunt(f.Path) || (only != nil && !only[f.Path]) || f.Status == "binary" {
+		if !set[f.Path] || f.Status == "binary" {
 			continue
 		}
 		ids := make([]string, len(f.Hunks))
@@ -564,16 +677,6 @@ func slices(d *diff.Diff, only map[string]bool, n int) ([][]string, []map[string
 		out, files = append(out, cur), append(files, curFiles)
 	}
 	return out, files
-}
-
-func skipHunt(p string) bool {
-	l := strings.ToLower(p)
-	for _, s := range []string{".md", ".txt", ".lock", ".sum", ".svg", ".png", ".jpg", ".gif", ".snap", "package-lock.json", "yarn.lock", "pnpm-lock.yaml"} {
-		if strings.HasSuffix(l, s) {
-			return true
-		}
-	}
-	return strings.Contains(l, "/generated/") || strings.Contains(l, "/vendor/") || strings.HasPrefix(l, "docs/")
 }
 
 // placeFinding checks the quote exists, corrects the line, and finds its hunk.
@@ -629,6 +732,52 @@ func placeFinding(f *Finding, d *diff.Diff, ws *workspace.Workspace) bool {
 	return true
 }
 
+// MaxSuggestionLines bounds a one-click fix: longer rewrites are not "a fix
+// for this line" and belong in the author's hands.
+const MaxSuggestionLines = 15
+
+// checkSuggestion keeps a suggested fix only when GitHub can apply it as
+// written: it replaces lines Line..EndLine of one hunk on the new side of the
+// diff (added or context lines), and it changes something.
+func checkSuggestion(f *Finding, d *diff.Diff) {
+	drop := func() { f.Suggestion, f.EndLine = "", 0 }
+	if strings.TrimSpace(f.Suggestion) == "" {
+		drop()
+		return
+	}
+	if f.EndLine < f.Line {
+		f.EndLine = f.Line
+	}
+	if f.EndLine-f.Line+1 > MaxSuggestionLines || strings.Count(f.Suggestion, "\n") >= MaxSuggestionLines+5 {
+		drop()
+		return
+	}
+	var old []string
+	for _, file := range d.Files {
+		if file.Path != f.File {
+			continue
+		}
+		for _, h := range file.Hunks {
+			got := map[int]string{}
+			for _, l := range h.Lines {
+				if l.Kind != diff.Del && l.New >= f.Line && l.New <= f.EndLine {
+					got[l.New] = l.Text
+				}
+			}
+			if len(got) == f.EndLine-f.Line+1 {
+				for n := f.Line; n <= f.EndLine; n++ {
+					old = append(old, got[n])
+				}
+			}
+		}
+	}
+	if old == nil || normWS(strings.Join(old, "\n")) == normWS(f.Suggestion) {
+		drop()
+		return
+	}
+	f.Suggestion = strings.TrimRight(f.Suggestion, "\n")
+}
+
 // dedupe merges findings that point at the same place (same file, within 3
 // lines, or the same quoted code). The most confident report wins.
 func dedupe(fs []Finding) ([]Finding, int) {
@@ -647,8 +796,10 @@ func dedupe(fs []Finding) ([]Finding, int) {
 			if o.File == f.File && (absInt(o.Line-f.Line) <= 3 || normWS(o.Quote) == normWS(f.Quote)) {
 				dups++
 				merged = true
-				// Keep the hunter's finding over a check, and the more confident one.
-				if (o.Source == "check" && f.Source != "check") || (o.Source == f.Source && confRank(f.Confidence) > confRank(o.Confidence)) {
+				by := sources(*o, f)
+				// Keep God's Eye's own hunter over open-code-review over a check,
+				// and the more confident of two reports from the same source.
+				if sourceRank(f.Source) > sourceRank(o.Source) || (o.Source == f.Source && confRank(f.Confidence) > confRank(o.Confidence)) {
 					ref := o.CheckRef
 					f.AlsoAt = append(f.AlsoAt, o.AlsoAt...)
 					*o = f
@@ -661,6 +812,7 @@ func dedupe(fs []Finding) ([]Finding, int) {
 						o.CheckRef = f.CheckRef
 					}
 				}
+				o.FoundBy = by
 				break
 			}
 		}
@@ -669,6 +821,57 @@ func dedupe(fs []Finding) ([]Finding, int) {
 		}
 	}
 	return out, dups
+}
+
+func sourceRank(s string) int {
+	switch s {
+	case "check":
+		return 0
+	case "ocr":
+		return 1
+	}
+	return 2
+}
+
+// sources lists every hunter behind two merged reports, when there is more than one.
+func sources(a, b Finding) []string {
+	var out []string
+	add := func(f Finding) {
+		for _, x := range append([]string{f.Source}, f.FoundBy...) {
+			if x != "" && !slicesContains(out, x) {
+				out = append(out, x)
+			}
+		}
+	}
+	add(a)
+	add(b)
+	if len(out) < 2 {
+		return nil
+	}
+	sort.Strings(out)
+	return out
+}
+
+// withoutKnown drops new reports of a bug an earlier round already reported
+// and is still open, so a re-review never lists the same bug twice.
+func withoutKnown(fs, carried []Finding) ([]Finding, int) {
+	var out []Finding
+	n := 0
+	for _, f := range fs {
+		dup := false
+		for _, c := range carried {
+			if c.Status == "confirmed" && c.File == f.File && (absInt(c.Line-f.Line) <= 3 || normWS(c.Quote) == normWS(f.Quote)) {
+				dup = true
+				break
+			}
+		}
+		if dup {
+			n++
+			continue
+		}
+		out = append(out, f)
+	}
+	return out, n
 }
 
 // tally turns votes into a status. A finding needs a strict majority of all
@@ -722,6 +925,15 @@ func tally(f *Finding, voters int) {
 		return
 	}
 	f.Introduced = intro*2 > real || (intro*2 == real && f.InDiff)
+	if f.Suggestion != "" && f.Status == "confirmed" {
+		fixOK := 0
+		for _, v := range f.Votes {
+			if v.Real && v.FixOK {
+				fixOK++
+			}
+		}
+		f.FixVerified = fixOK*2 > real
+	}
 }
 
 func carriedOpen(carried []Finding, offset int) []Finding {
@@ -795,6 +1007,7 @@ func tail(s string, n int) string {
 
 // DryRun returns what the agents would be sent (shared context + map task).
 func DryRun(in *source.Input, d *diff.Diff, ws *workspace.Workspace) string {
+	d, _ = Scope(d, scope.Config{}, nil)
 	callers := ""
 	if ws != nil {
 		callers = workspace.FormatCallers(ws.Callers(workspace.Symbols(d), 40, 4))
@@ -809,4 +1022,37 @@ func inRanges(rs [][2]int, line int) bool {
 		}
 	}
 	return false
+}
+
+// carryForward keeps the confirmed findings of the last round. One is fixed
+// only when its file is still there and the quoted code is gone: a moved or
+// unreadable file keeps the bug open, since "fixed" resolves its PR thread.
+func carryForward(ws *workspace.Workspace, prev []Finding) ([]Finding, int) {
+	var out []Finding
+	fixed := 0
+	for _, f := range prev {
+		if f.Status != "confirmed" {
+			continue
+		}
+		if _, ok := ws.Contains(f.File, f.Quote); !ok {
+			if _, err := ws.Lines(f.File); err == nil {
+				f.Status, f.Why = "fixed", "the quoted code is gone at the new head"
+				fixed++
+			}
+		}
+		out = append(out, f)
+	}
+	return out, fixed
+}
+
+// hunted keeps the findings on files this review hunts (code and tests), so
+// an outside engine cannot report on a file the repository excluded.
+func hunted(fs []Finding, plan *scope.Plan) []Finding {
+	var out []Finding
+	for _, f := range fs {
+		if k := plan.Of(f.File).Kind; k == scope.Code || k == scope.Test {
+			out = append(out, f)
+		}
+	}
+	return out
 }

@@ -186,11 +186,13 @@ const findingsSchemaJSON = `{
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["title","file","line","quote","severity","category","scenario","fix","bug_class","also_at","confidence"],
+        "required": ["title","file","line","end_line","quote","severity","category","scenario","fix","suggestion","bug_class","also_at","confidence"],
         "properties": {
           "title":     {"type": "string"},
           "file":      {"type": "string"},
           "line":      {"type": "integer"},
+          "end_line":  {"type": "integer"},
+          "suggestion":{"type": "string"},
           "quote":     {"type": "string"},
           "severity":  {"type": "string", "enum": ["important","minor","nit"]},
           "category":  {"type": "string", "enum": ["logic","data","concurrency","security","contract","error_handling","resource","performance","other"]},
@@ -216,9 +218,10 @@ const findingsSchemaJSON = `{
 const verdictSchemaJSON = `{
   "type": "object",
   "additionalProperties": false,
-  "required": ["real","introduced","severity","confidence","reason"],
+  "required": ["real","introduced","severity","confidence","reason","fix_ok"],
   "properties": {
     "real":       {"type": "boolean"},
+    "fix_ok":     {"type": "boolean"},
     "introduced": {"type": "boolean"},
     "severity":   {"type": "string", "enum": ["important","minor","nit"]},
     "confidence": {"type": "string", "enum": ["low","medium","high"]},

@@ -141,9 +141,12 @@ var (
 	LensAll      = Lens{"all", `Look for every kind of real defect: wrong results and edge cases (empty, null, zero, one, many, boundaries, off-by-one, pagination, ordering), data loss or corruption, broken contracts with callers, security and access control (missing auth or tenant checks, injection, data exposure), concurrency (races, shared mutable state, ignored cancellation, deadlocks), error handling (swallowed errors, wrong error types, partial failure leaving bad state), resource leaks, and performance cliffs (N+1 queries, unbounded loops or memory).`}
 	LensLogic    = Lens{"logic", `Look for wrong results: edge cases (empty, null, zero, one, many, boundaries, off-by-one, pagination, ordering, time zones), wrong conditions, data loss or corruption, state that ends up inconsistent after partial failure, and performance cliffs (N+1 queries, unbounded loops or memory).`}
 	LensContract = Lens{"contract", `Look for broken promises: callers that now get different behaviour or errors, API and schema contract changes, missing or wrong access control and tenant isolation, injection or data exposure, concurrency (races, ignored cancellation), swallowed or misclassified errors, and resource leaks.`}
+	// LensTests hunts in test files only: tests that will fail on their own
+	// later, or that pass without proving what they claim.
+	LensTests = Lens{"tests", `Your files are tests. Look for tests that will break on their own or prove nothing: hard-coded dates, years or terms that expire; dependence on the real clock, time zone, locale, randomness or ordering; shared state that leaks between tests; assumptions about the OS or environment (paths, /proc, ports); assertions that cannot fail or check the wrong value; and a test whose name claims a behaviour it never checks. Do not report style or missing tests.`}
 )
 
-func huntTask(l Lens, slice []string, delta string, known []string) string {
+func huntTask(l Lens, slice []string, delta string, known []string, checklists string) string {
 	var b strings.Builder
 	b.WriteString("## Your task: hunt for bugs this PR introduces\n")
 	b.WriteString(l.Focus)
@@ -162,6 +165,7 @@ func huntTask(l Lens, slice []string, delta string, known []string) string {
 			fmt.Fprintf(&b, "- %s\n", k)
 		}
 	}
+	b.WriteString(checklists)
 	b.WriteString(`
 How to hunt:
 1. Read each changed function in full, not only the diff lines. Read what it calls and what calls it (see <callers>, use grep).
@@ -173,6 +177,7 @@ Cast a wide net: report every defect you can back with a concrete scenario, even
 severity: "important" = bug, outage, security hole or data problem a user or operator would hit; "minor" = real wrong behaviour with limited impact (rare path, cosmetic data, degraded but recoverable); "nit" = harmless.
 
 Each finding: title ≤ 10 words; file + line at the PR head; quote = the exact line of code at that location, copied from read_file or the diff (it is checked automatically, and findings whose quote is not in the file are discarded); scenario ≤ 40 words (input → line → wrong outcome); fix ≤ 25 words; bug_class = short name for the pattern ("unchecked cancellation", "missing tenant filter").
+suggestion: when the fix is small, local and certain, the exact new code that replaces lines line..end_line of the file (whole lines, same indentation, at most 15 lines); it becomes a one-click fix on the PR once the verifiers accept it. Otherwise "" and end_line = line. Never put a suggestion on a fix that needs changes elsewhere.
 
 Finish by calling submit_findings (with an empty list if you found nothing real).`)
 	return b.String()
@@ -191,6 +196,9 @@ func verifyTask(l Lens, f Finding, hunkText string) string {
 	b.WriteString("Another agent reported the bug below. Reporters are often wrong; most reported bugs are not real. Decide for yourself from the code.\n")
 	fmt.Fprintf(&b, "Your method: %s\n\n", l.Focus)
 	fmt.Fprintf(&b, "<reported_bug>\ntitle: %s\nlocation: %s:%d\ncode: %s\nscenario: %s\nsuggested fix: %s\n</reported_bug>\n", f.Title, f.File, f.Line, f.Quote, f.Scenario, f.Fix)
+	if f.Suggestion != "" {
+		fmt.Fprintf(&b, "\nProposed replacement for lines %d-%d of %s (it would be offered as a one-click commit):\n```\n%s\n```\n", f.Line, f.EndLine, f.File, f.Suggestion)
+	}
 	if hunkText != "" {
 		fmt.Fprintf(&b, "\nThe PR hunk around it:\n%s\n", hunkText)
 	}
@@ -200,6 +208,7 @@ Read the code at the location and whatever else you need. Then decide:
 - introduced: true if this PR's changes cause or expose it; false if the same bug exists on the base branch unchanged.
 - severity: important (bug, outage, security, data problem a user would hit), minor (real wrong behaviour, limited impact) or nit (harmless).
 - reason: ≤ 40 words, cite what you read (file:line).
+- fix_ok: true only if a proposed replacement is shown above and putting it in place of exactly those lines fixes the bug, compiles, and changes nothing else; otherwise false.
 Finish by calling submit_verdict.`)
 	return b.String()
 }
