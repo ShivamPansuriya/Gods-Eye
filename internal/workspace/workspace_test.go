@@ -21,6 +21,7 @@ func repo(t *testing.T) (string, string) {
 	write("a/svc.go", "package a\n\nfunc Charge(id string) error {\n\treturn nil\n}\n")
 	write("b/use.go", "package b\n\nfunc x() { a.Charge(\"1\") }\n")
 	write("secret.txt", "top\n")
+	write("deploy/.env", "DB_PASSWORD=hunter2\n")
 	run := func(args ...string) string {
 		cmd := exec.Command("git", args...)
 		cmd.Dir = dir
@@ -107,5 +108,36 @@ func TestDefName(t *testing.T) {
 		if got := defName(in); got != want {
 			t.Errorf("defName(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestCredentialFilesAreNeverShown(t *testing.T) {
+	dir, head := repo(t)
+	w, err := Open(dir, head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out := w.Read("deploy/.env", 1, 5); strings.Contains(out, "hunter2") || !strings.Contains(out, "credential file") {
+		t.Errorf("read_file showed a credential file: %q", out)
+	}
+	if out := w.Grep("PASSWORD", ""); strings.Contains(out, "hunter2") {
+		t.Errorf("grep showed a credential file: %q", out)
+	}
+	if _, ok := w.Contains("deploy/.env", "hunter2"); ok {
+		t.Error("Contains read a credential file")
+	}
+}
+
+func TestSymlinkToACredentialFileIsRefused(t *testing.T) {
+	dir, _ := repo(t)
+	if err := os.Symlink("deploy/.env", filepath.Join(dir, "notes.txt")); err != nil {
+		t.Skip(err)
+	}
+	w, err := Open(dir, "") // working tree, as --local reads it
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out := w.Read("notes.txt", 1, 5); strings.Contains(out, "hunter2") {
+		t.Errorf("a symlink leaked a credential file: %q", out)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -248,14 +249,98 @@ func (c *Client) ClosingIssues(ctx context.Context, fullName string, n int) ([]I
 			} `json:"repository"`
 		} `json:"data"`
 	}
-	gql := c.BaseURL + "/graphql"
-	if strings.HasSuffix(c.BaseURL, "/api/v3") { // GitHub Enterprise Server
-		gql = strings.TrimSuffix(c.BaseURL, "/v3") + "/graphql"
-	}
-	if err := c.do(ctx, "POST", gql, q, "", &out); err != nil {
+	if err := c.do(ctx, "POST", c.graphqlURL(), q, "", &out); err != nil {
 		return nil, err
 	}
 	return out.Data.Repository.PullRequest.Closing.Nodes, nil
+}
+
+func (c *Client) graphqlURL() string {
+	if strings.HasSuffix(c.BaseURL, "/api/v3") { // GitHub Enterprise Server
+		return strings.TrimSuffix(c.BaseURL, "/v3") + "/graphql"
+	}
+	return c.BaseURL + "/graphql"
+}
+
+// graphql runs one query or mutation; GraphQL reports errors with a 200.
+func (c *Client) graphql(ctx context.Context, query string, vars map[string]any, data any) error {
+	var out struct {
+		Data   json.RawMessage `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := c.do(ctx, "POST", c.graphqlURL(), map[string]any{"query": query, "variables": vars}, "", &out); err != nil {
+		return err
+	}
+	if len(out.Errors) > 0 {
+		return &Error{Status: 200, Message: out.Errors[0].Message}
+	}
+	if data == nil || len(out.Data) == 0 {
+		return nil
+	}
+	return json.Unmarshal(out.Data, data)
+}
+
+// ResolveThreads replies to and resolves the open review threads this account
+// started whose first comment carries one of the markers in replies (marker →
+// reply text). Threads started by anyone else are never touched.
+func (c *Client) ResolveThreads(ctx context.Context, fullName string, n int, replies map[string]string) (int, error) {
+	if len(replies) == 0 {
+		return 0, nil
+	}
+	owner, name, _ := strings.Cut(fullName, "/")
+	const list = `query($o:String!,$n:String!,$p:Int!,$c:String){repository(owner:$o,name:$n){pullRequest(number:$p){reviewThreads(first:100,after:$c){pageInfo{hasNextPage endCursor} nodes{id isResolved comments(first:1){nodes{body viewerDidAuthor}}}}}}}`
+	const resolve = `mutation($t:ID!,$b:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t,body:$b}){clientMutationId} resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}`
+	done := 0
+	var cursor any
+	for page := 0; page < 20; page++ {
+		var out struct {
+			Repository struct {
+				PullRequest struct {
+					Threads struct {
+						PageInfo struct {
+							HasNext bool   `json:"hasNextPage"`
+							End     string `json:"endCursor"`
+						} `json:"pageInfo"`
+						Nodes []struct {
+							ID       string `json:"id"`
+							Resolved bool   `json:"isResolved"`
+							Comments struct {
+								Nodes []struct {
+									Body string `json:"body"`
+									Mine bool   `json:"viewerDidAuthor"`
+								} `json:"nodes"`
+							} `json:"comments"`
+						} `json:"nodes"`
+					} `json:"reviewThreads"`
+				} `json:"pullRequest"`
+			} `json:"repository"`
+		}
+		if err := c.graphql(ctx, list, map[string]any{"o": owner, "n": name, "p": n, "c": cursor}, &out); err != nil {
+			return done, err
+		}
+		ts := out.Repository.PullRequest.Threads
+		for _, t := range ts.Nodes {
+			if t.Resolved || len(t.Comments.Nodes) == 0 || !t.Comments.Nodes[0].Mine {
+				continue
+			}
+			for marker, reply := range replies {
+				if strings.Contains(t.Comments.Nodes[0].Body, marker) {
+					if err := c.graphql(ctx, resolve, map[string]any{"t": t.ID, "b": reply}, nil); err != nil {
+						return done, err
+					}
+					done++
+					break
+				}
+			}
+		}
+		if !ts.PageInfo.HasNext {
+			break
+		}
+		cursor = ts.PageInfo.End
+	}
+	return done, nil
 }
 
 // File returns a file's raw contents at a ref ("" if it does not exist).
@@ -279,10 +364,12 @@ func (c *Client) Comment(ctx context.Context, fullName string, n int, body strin
 
 // ReviewComment is a comment pinned to one line of a PR's diff.
 type ReviewComment struct {
-	Path string `json:"path"`
-	Line int    `json:"line"`
-	Side string `json:"side"`
-	Body string `json:"body"`
+	Path      string `json:"path"`
+	StartLine int    `json:"start_line,omitempty"`
+	StartSide string `json:"start_side,omitempty"`
+	Line      int    `json:"line"`
+	Side      string `json:"side"`
+	Body      string `json:"body"`
 }
 
 // Review posts a PR review: the summary as its body and each comment on its
@@ -370,4 +457,24 @@ type PullRequestEvent struct {
 	Repository  struct {
 		FullName string `json:"full_name"`
 	} `json:"repository"`
+}
+
+// AuthHeader is the git HTTP header that authenticates with a GitHub token.
+func AuthHeader(token string) string {
+	if token == "" {
+		return ""
+	}
+	return "Authorization: Basic " + base64.StdEncoding.EncodeToString([]byte("x-access-token:"+token))
+}
+
+// GitAuthEnv lets a child process's git fetch from urlPrefix (such as
+// "https://github.com/") with the token, so a blobless clone can load the
+// files it lacks. The token goes in the environment, never on disk or in
+// argv, and git sends it to that host only.
+func GitAuthEnv(token, urlPrefix string) []string {
+	env := []string{"GIT_TERMINAL_PROMPT=0"}
+	if h := AuthHeader(token); h != "" && urlPrefix != "" {
+		env = append(env, "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=http."+urlPrefix+".extraHeader", "GIT_CONFIG_VALUE_0="+h)
+	}
+	return env
 }

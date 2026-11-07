@@ -52,7 +52,7 @@ func TestBuildMergeRiskScoresFiveSignals(t *testing.T) {
 		{ID: "U2", Tier: "agent", Evidence: UnitEvidence{Status: "provided"}},
 		{ID: "U3", Tier: "static"},
 	}}
-	mr := BuildMergeRisk(r, d, risk.Defaults, 0, "")
+	mr := BuildMergeRisk(r, d, risk.Defaults, nil, 0, "")
 	got := map[string]Signal{}
 	for _, s := range mr.Signals {
 		got[s.Key] = s
@@ -69,7 +69,7 @@ func TestBuildMergeRiskScoresFiveSignals(t *testing.T) {
 	}
 
 	// No architect (quick depth): rollback and errors are not assessed and do not count.
-	q := BuildMergeRisk(&Review{}, d, nil, 1, "go test ./...")
+	q := BuildMergeRisk(&Review{}, d, nil, nil, 1, "go test ./...")
 	for _, s := range q.Signals {
 		if (s.Key == "rollback" || s.Key == "errors" || s.Key == "alignment") && s.Level != -1 {
 			t.Fatalf("quick %s = %d", s.Key, s.Level)
@@ -82,18 +82,25 @@ func TestBuildMergeRiskScoresFiveSignals(t *testing.T) {
 
 func TestAutoDepth(t *testing.T) {
 	doc, _ := diff.Parse("diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1,1 +1,2 @@\n+doc\n")
-	if dp, _ := AutoDepth(doc, risk.Defaults, nil); dp != "quick" {
+	if dp, _ := AutoDepth(doc, risk.Defaults, nil, nil); dp != "quick" {
 		t.Fatal("docs-only:", dp)
 	}
 	d := exampleDiff(t)
-	if dp, _ := AutoDepth(d, risk.Defaults, nil); dp != "standard" {
+	if dp, _ := AutoDepth(d, risk.Defaults, nil, nil); dp != "standard" {
 		t.Fatal("small code change:", dp)
 	}
 	auth, _ := diff.Parse("diff --git a/src/auth/login.go b/src/auth/login.go\n--- a/src/auth/login.go\n+++ b/src/auth/login.go\n@@ -1,1 +1,2 @@\n+x\n")
-	if dp, why := AutoDepth(auth, risk.Defaults, nil); dp != "deep" || !strings.Contains(why, "auth") {
+	if dp, why := AutoDepth(auth, risk.Defaults, nil, nil); dp != "deep" || !strings.Contains(why, "auth") {
 		t.Fatal("auth change:", dp, why)
 	}
-	if dp, _ := AutoDepth(d, risk.Defaults, map[string]bool{"README.md": true}); dp != "quick" {
+	if dp, _ := AutoDepth(d, risk.Defaults, map[string]bool{"README.md": true}, nil); dp != "quick" {
 		t.Fatal("re-review with no code changes:", dp)
+	}
+}
+
+func TestAutoDepthHuntsATestsOnlyPR(t *testing.T) {
+	d, _ := diff.Parse("diff --git a/a/x_test.go b/a/x_test.go\n--- a/a/x_test.go\n+++ b/a/x_test.go\n@@ -1,1 +1,2 @@\n+func TestX(t *testing.T) {}\n")
+	if dp, why := AutoDepth(d, risk.Defaults, nil, nil); dp == "quick" {
+		t.Fatalf("a tests-only PR still gets the tests lens: %s (%s)", dp, why)
 	}
 }

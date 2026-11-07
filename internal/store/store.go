@@ -46,6 +46,7 @@ type RepoSettings struct {
 	Effort     string  `json:"effort"`  // low … max
 	Budget     float64 `json:"budget"`  // max spend per review, USD
 	Comment    bool    `json:"comment"` // post a summary comment on the PR
+	OCR        string  `json:"ocr"`     // "" = run open-code-review as a second engine when installed, "off" = never
 }
 
 // DefaultSettings are applied when a repository is connected.

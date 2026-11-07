@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -109,9 +110,9 @@ func FromPR(pr, repo string) (*Input, error) {
 		}
 	}
 
-	for _, f := range guidanceFiles {
+	for _, f := range guidanceFiles { // from the base branch: a PR cannot instruct its own review
 		c, err := run("gh", "api", "-H", "Accept: application/vnd.github.raw",
-			fmt.Sprintf("repos/%s/contents/%s?ref=%s", in.Repo, f, in.HeadSHA))
+			fmt.Sprintf("repos/%s/contents/%s?ref=%s", in.Repo, f, url.QueryEscape(in.BaseRef)))
 		if err == nil && len(c) > 0 {
 			in.Guidance[f] = string(c)
 		}

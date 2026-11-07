@@ -1,11 +1,13 @@
 package review
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
 
 	"github.com/ShivamPansuriya/gods-eye/internal/diff"
+	"github.com/ShivamPansuriya/gods-eye/internal/scope"
 )
 
 func exampleDiff(t *testing.T) *diff.Diff {
@@ -77,38 +79,52 @@ func TestTallyMajority(t *testing.T) {
 	}
 }
 
-func TestSlicesBalanceAndSkipDocs(t *testing.T) {
+func TestHuntPlanSendsCodeToLensesAndTestsToTheTestsLens(t *testing.T) {
 	var b strings.Builder
-	for i := 0; i < 12; i++ {
-		name := "f" + string(rune('a'+i)) + ".go"
-		b.WriteString("diff --git a/" + name + " b/" + name + "\n--- a/" + name + "\n+++ b/" + name + "\n@@ -1,1 +1,200 @@\n")
-		for j := 0; j < 200; j++ {
+	file := func(name string, lines int) {
+		b.WriteString("diff --git a/" + name + " b/" + name + "\n--- a/" + name + "\n+++ b/" + name + "\n@@ -1,1 +1," + fmt.Sprint(lines) + " @@\n")
+		for j := 0; j < lines; j++ {
 			b.WriteString("+x\n")
 		}
 	}
-	b.WriteString("diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1,1 +1,2 @@\n+doc\n")
+	for i := 0; i < 12; i++ {
+		file("f"+string(rune('a'+i))+".go", 200)
+	}
+	file("README.md", 1)
+	file("package-lock.json", 50)
+	file("fa_test.go", 40)
+	file("deploy/.env", 2)
 	d, _ := diff.Parse(b.String())
-	sl, files := slices(d, nil, 10)
-	if len(files) != len(sl) {
-		t.Fatal("file sets do not match slices")
-	}
-	if len(sl) == 0 || len(sl) > 10 {
-		t.Fatalf("slices = %d", len(sl))
-	}
-	n := 0
-	for _, s := range sl {
-		for _, x := range s {
-			if strings.HasPrefix(x, "README.md") {
-				t.Fatal("docs were sent to a hunter")
-			}
-			n++
+	d, plan := Scope(d, scope.Config{}, nil)
+	for _, f := range d.Files {
+		if f.Path == "deploy/.env" {
+			t.Fatal("a credential file stayed in the diff")
 		}
 	}
-	if n != 12 {
-		t.Fatalf("files covered = %d, want 12", n)
+	hs := huntPlan(d, plan, nil, []Lens{LensLogic, LensContract})
+	code, tests := map[string]int{}, map[string]int{}
+	slicesPerLens := map[string]int{}
+	for _, h := range hs {
+		slicesPerLens[h.lens.Name]++
+		for p := range h.files {
+			if h.lens == LensTests {
+				tests[p]++
+			} else {
+				code[p]++
+			}
+		}
 	}
-	only, _ := slices(d, map[string]bool{"fa.go": true}, 10)
-	if len(only) != 1 || len(only[0]) != 1 {
+	if len(code) != 12 || code["fa.go"] != 2 {
+		t.Fatalf("code files hunted = %v", code)
+	}
+	if len(tests) != 1 || tests["fa_test.go"] != 1 {
+		t.Fatalf("test files hunted = %v", tests)
+	}
+	if slicesPerLens["logic"] == 0 || slicesPerLens["logic"] > 10 || slicesPerLens["logic"] != slicesPerLens["contract"] || slicesPerLens["tests"] != 1 {
+		t.Fatalf("slices per lens = %v", slicesPerLens)
+	}
+	only := huntPlan(d, plan, map[string]bool{"fa.go": true}, []Lens{LensAll})
+	if len(only) != 1 || len(only[0].files) != 1 {
 		t.Fatalf("delta slices = %v", only)
 	}
 }

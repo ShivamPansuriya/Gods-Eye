@@ -1,0 +1,13 @@
+God's Eye — internal/scope
+
+The file lists in defaults.go and the review checklists in checklists/
+(the *.md files and system_rules.json) are taken from open-code-review:
+
+  https://github.com/alibaba/open-code-review
+  commit 0d403392073bcb0d3894c5364b0a85e7b6a47e0d (2026-11-06)
+  Copyright 2026 alibaba/open-code-review Contributors
+  Licensed under the Apache License, Version 2.0 (LICENSE.open-code-review)
+
+Changes: the generic default.md checklist is not included; the exclude
+patterns are grouped by reason; a few lockfile and credential patterns
+(yarn.lock, go.sum, *.pem, *.key, ...) were added.

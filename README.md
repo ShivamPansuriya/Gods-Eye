@@ -31,21 +31,65 @@ No style comments or "consider…" suggestions. Severity is decided by the voter
 ## How a review runs
 
 ```
-gh / git ──► diff (H1..Hn) ──► caller index (git grep for every changed symbol)
+gh / git ──► diff ──► file gates ──► caller index (git grep for every changed symbol)
+              credential files removed │ tests → tests lens · lockfiles, generated, vendored → skipped
                  │
                  ├──► mapper ─────────────► story, units, tiers, checks, proof per unit
                  ├──► architect ──────────► architecture, code flows, practices, existing-design problems
-                 ├──► hunter × N slices ──► candidate bugs (quote + scenario)
+                 ├──► hunter × N slices ──► candidate bugs (quote + scenario + optional fix)
+                 │     + language checklist per file
+                 ├──► open-code-review ───► candidate bugs from Alibaba's engine (optional, ≤15% of the budget)
                  │                               │
-                 │          drop invented quotes, merge duplicates
+                 │          drop invented quotes, merge duplicates (who found it is kept)
                  │                               │
                  └──────────────► 3 voters per finding ──► confirmed / minor / pre-existing / dismissed
+                                  (each also checks the fix)        + fixes the voters accepted
 ```
 
 - **Depth:** `--depth auto` (default) picks for you: `quick` when there is no code to hunt in (docs, lockfiles), `deep` for sensitive paths or more than 600 changed lines, `standard` otherwise. Or set it: `quick` (mapper only), `standard` (hunters + 3 voters), `deep` (two hunter lenses per slice: logic and contracts).
 - **Cost control:** every agent shares one cached prefix (tools, system prompt, PR header), so most input tokens are cheap cache reads. Each hunter sees only its slice of the diff, verifiers only the hunk in question. `--budget` is the base budget for a PR up to 1,500 changed lines of code; it grows in proportion with size, up to 4×. 45% of it is held back so the findings can be checked: hunters that reach their share are told to submit what they have.
 - **Re-review rounds:** the state of each review is saved in `.godseye/state/`. On the next run, hunters look only at what changed since the last reviewed commit and are told what was already reported. Earlier bugs whose code is gone are marked **Fixed**. From round 3, the page suggests rethinking the approach instead of patching line by line. Use `--fresh` to start over.
 - **Empirical evidence:** `--verify-cmd "go test ./..."` runs the command in the checkout and feeds its output to every agent.
+- **Votes stop early:** the third verifier is skipped when the first two already rejected a claim, because a third "real" vote can't change the outcome (proved by a test over every vote combination).
+
+## What gets reviewed
+
+Every changed file passes five gates before any agent sees it:
+
+| Gate | Files | What happens |
+|---|---|---|
+| Credentials | `.env` (not `.env.example`), `*.pem`, `*.key`, `id_rsa`, `.netrc`, `.npmrc`, keystores … | Removed from the diff. No agent, report or PR comment gets them, and the code tools refuse to read them. |
+| Binary | images, archives, compiled files | Skipped. |
+| Repo rules | your `exclude` / `include` globs | Skipped, or forced in. |
+| Not code | lockfiles, generated, vendored, build output, test data, docs | Skipped by the hunters. The mapper still sees them. |
+| Tests | `*_test.go`, `*.spec.ts`, `src/test/**` … | Reviewed by a tests lens: up to 3 slices that look for tests that can't fail. |
+
+Each hunter also gets the **review checklist** for its files' languages: 62 rule documents from [open-code-review](https://github.com/alibaba/open-code-review) (Java, Go, Python, TypeScript, SQL, Terraform, Dockerfile …), matched by path. The page and the PR summary show what was reviewed, skipped or kept from the model.
+
+Set your own scope in `.godseye.json`:
+
+```json
+{
+  "exclude": ["legacy/**", "**/*.pb.go"],
+  "include": ["scripts/release.sh"],
+  "checklists": [
+    { "path": "src/billing/**", "rule": "Money is in cents (long). Every write is idempotent on requestId.", "merge_system_rule": true }
+  ]
+}
+```
+
+`rule` can be the text or a path to a `.md` file in the repo. `merge_system_rule: true` keeps the language checklist and adds yours. An existing `.opencodereview/rule.json` is read too. **These settings and the risk rules are read from the base branch**, so a PR can't exclude its own files or lower its own risk.
+
+## Second engine: open-code-review
+
+God's Eye can also hunt with Alibaba's [open-code-review](https://github.com/alibaba/open-code-review) (`ocr`): its own prompts, file grouping and language rules, on the same commit range. Its comments are treated like any hunter's findings: placed against the code, merged with duplicates, and checked by the same 3 verifiers. Nothing it says reaches the page or the PR without that check.
+
+```bash
+npm install -g @alibaba-group/open-code-review                     # installs `ocr`
+go install github.com/alibaba/open-code-review/cmd/opencodereview@latest   # or from source
+```
+
+When `ocr` or `opencodereview` is on the `PATH` (or `GODSEYE_OCR` points at it), it runs automatically, with up to 15% of the hunting budget. It gets only the API key, the PATH and proxy settings, never the rest of the environment. Turn it off with `--ocr off`, `GODSEYE_OCR=off`, or the switch in a repo's settings in the web app. Each finding shows who found it: God's Eye, open-code-review, or both.
 
 ## Three ways to run it
 
@@ -114,6 +158,9 @@ gh gods-eye history               # past reviews; gh gods-eye open <id> reopens 
 
 With `--comment`, the review goes up as a GitHub PR review from your account: the summary (with the merge-risk table) as the review body, and one comment on the exact line of each verified **blocking** bug (what goes wrong, the fix, how many verifiers agreed). Minor and pre-existing bugs, and bugs on lines the PR didn't touch, stay in the summary, so the PR thread only shows what needs a person. On later rounds only new bugs get line comments. The web app posts reviews the same way.
 
+- **One-click fixes:** when a hunter can give the exact replacement for the lines (at most 15), the verifiers check the fix too. If most of them accept it, the comment carries a GitHub suggestion: the author clicks **Commit suggestion**. A minor bug is posted too when its fix is ready, since it costs the author one click.
+- **Threads close themselves:** when a later round finds that a bug's code is gone, God's Eye replies "Fixed in `abc1234`" and resolves the thread it opened. It never touches threads someone else started.
+
 The extension builds itself once with Go. `gh` only installs extensions straight from GitHub when the repository is named `gh-<name>`, so the clone is named `gh-gods-eye`. If this repository is renamed to `gh-gods-eye`, `.github/workflows/release.yml` publishes prebuilt binaries on each `v*` tag, and then `gh extension install ShivamPansuriya/gh-gods-eye` works directly, with no Go needed.
 
 ## Install
@@ -158,7 +205,7 @@ Progress is kept in your browser per PR and commit. Keys: `j` / `k` move, `1`-`4
 
 ## Risk rules
 
-Path rules can only **raise** a unit's tier, never lower it. Built in: CI workflows, auth, billing, payments, permissions, migrations, and secrets always need a person. Add your own in `.godseye.json` at the repo root:
+Path rules can only **raise** a unit's tier, never lower it, and they are read from the base branch. Built in: CI workflows, auth, billing, payments, permissions, migrations, and secrets always need a person. Add your own in `.godseye.json` at the repo root:
 
 ```json
 {
@@ -169,7 +216,7 @@ Path rules can only **raise** a unit's tier, never lower it. Built in: CI workfl
 }
 ```
 
-Tell the reviewer what matters in your code with a `REVIEW.md`. It's read on every run, along with `CLAUDE.md` and `AGENTS.md`.
+Tell the reviewer what matters in your code with a `REVIEW.md`. It's read on every run, along with `CLAUDE.md` and `AGENTS.md`, from the base branch: a PR can't add instructions for its own review.
 
 ## Run on every PR (GitHub Action)
 
@@ -208,6 +255,10 @@ gh pr view / gh pr diff ──► diff parser (hunks H1..Hn, line numbers)
 ```
 
 Default model: `claude-opus-5-5` at `high` effort. The CLI and the page show tokens, cache hit rate and cost per stage after each run.
+
+## Credits
+
+The file gates and review checklists are adapted from Alibaba's [open-code-review](https://github.com/alibaba/open-code-review) (Apache-2.0); see [`internal/scope/NOTICE`](internal/scope/NOTICE).
 
 ## Roadmap
 

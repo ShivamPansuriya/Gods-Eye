@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -25,10 +26,13 @@ import (
 
 	"github.com/ShivamPansuriya/gods-eye/internal/diff"
 	"github.com/ShivamPansuriya/gods-eye/internal/eval"
+	"github.com/ShivamPansuriya/gods-eye/internal/github"
+	"github.com/ShivamPansuriya/gods-eye/internal/ocr"
 	"github.com/ShivamPansuriya/gods-eye/internal/remote"
 	"github.com/ShivamPansuriya/gods-eye/internal/render"
 	"github.com/ShivamPansuriya/gods-eye/internal/review"
 	"github.com/ShivamPansuriya/gods-eye/internal/risk"
+	"github.com/ShivamPansuriya/gods-eye/internal/scope"
 	"github.com/ShivamPansuriya/gods-eye/internal/server"
 	"github.com/ShivamPansuriya/gods-eye/internal/source"
 	"github.com/ShivamPansuriya/gods-eye/internal/store"
@@ -72,6 +76,7 @@ func main() {
 		parallel = flag.Int("parallel", 8, "max concurrent API calls")
 		budget   = flag.Float64("budget", 15, "base budget in USD for a PR up to 1,500 changed lines of code; grows with size up to 4x, 45% kept for checking findings")
 		verify   = flag.String("verify-cmd", "", "run this command in the checkout (tests, build) and use its output as evidence")
+		ocrMode  = flag.String("ocr", "auto", "auto: also hunt with Alibaba's open-code-review when it is installed | off")
 		fresh    = flag.Bool("fresh", false, "ignore the previous round; review the whole PR again")
 		wsDir    = flag.String("workspace", "", "repository checkout for code access (default: current repo)")
 		verbose  = flag.Bool("v", false, "log every agent")
@@ -134,11 +139,17 @@ func main() {
 			fail("no changes found in the diff")
 		}
 		ws := openWorkspace(*wsDir, in, *diffFile != "")
+		mb := mergeBase(in, ws)
+		readBase := baseReader(ws, mb)
+		d, plan := review.Scope(d, scope.Load(readBase), readBase)
 		if *dryRun {
 			fmt.Println(review.DryRun(in, d, ws))
 			return
 		}
-		rules := risk.Load(".godseye.json")
+		rules := risk.Defaults
+		if s, ok := readBase(".godseye.json"); ok {
+			rules = risk.Parse([]byte(s))
+		}
 		var r *review.Review
 		if *revFile != "" {
 			b, err := os.ReadFile(*revFile)
@@ -165,7 +176,7 @@ func main() {
 			t0 := time.Now()
 			r, err = review.Run(ctx, newClient(), in, d, ws, rules, review.Options{
 				Model: *model, Effort: *effort, VerifyEff: *vEffort, Depth: *depth, Parallel: *parallel, Budget: *budget,
-				VerifyCmd: *verify, Prev: prev, Log: logf,
+				VerifyCmd: *verify, Prev: prev, Scope: plan, Log: logf, OCR: cliOCR(*ocrMode, *effort, in, ws, mb),
 			})
 			check(err)
 			p := r.Pipeline
@@ -312,6 +323,57 @@ func fail(format string, a ...any) {
 	}
 	fmt.Fprintln(os.Stderr, "✕ "+msg)
 	os.Exit(1)
+}
+
+// mergeBase is the commit the PR or branch starts from, or "" when unknown.
+func mergeBase(in *source.Input, ws *workspace.Workspace) string {
+	if ws == nil || in.HeadSHA == "" || in.BaseRef == "" {
+		return ""
+	}
+	base := in.BaseRef
+	if !in.LocalMode {
+		base = "origin/" + base
+	}
+	out, err := exec.Command("git", "-C", ws.Root, "merge-base", base, in.HeadSHA).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// baseReader reads repository settings at the merge base, so a PR cannot
+// change how it is reviewed. With no repository (--diff), it reads the
+// current directory.
+func baseReader(ws *workspace.Workspace, mb string) func(string) (string, bool) {
+	if ws == nil || mb == "" {
+		return func(p string) (string, bool) {
+			b, err := os.ReadFile(p)
+			return string(b), err == nil
+		}
+	}
+	return func(p string) (string, bool) {
+		b, err := exec.Command("git", "-C", ws.Root, "show", mb+":"+p).Output()
+		return string(b), err == nil
+	}
+}
+
+// cliOCR runs open-code-review over the committed range merge-base..head in
+// the workspace. Uncommitted changes in --local mode are God's Eye's alone.
+func cliOCR(mode, effort string, in *source.Input, ws *workspace.Workspace, mb string) review.OCRFunc {
+	key := cmp.Or(os.Getenv("ANTHROPIC_API_KEY"), os.Getenv("CLAUDE_API_KEY"))
+	bin := ocr.Find()
+	if mode == "off" || ws == nil || key == "" || bin == "" {
+		return nil
+	}
+	if mb == "" {
+		step("open-code-review skipped: no merge base with %s", in.BaseRef)
+		return nil
+	}
+	return func(ctx context.Context, req review.OCRRequest) (*ocr.Result, error) {
+		return ocr.Run(ctx, ocr.Options{Bin: bin, Dir: ws.Root, Base: cmp.Or(req.From, mb), Head: in.HeadSHA, APIKey: key, Model: req.Model,
+			Effort: review.OCREffort(effort), MaxTokens: req.MaxTokens, Exclude: req.Exclude, Background: in.Title + "\n\n" + in.Body,
+			Env: github.GitAuthEnv(ghToken(), "https://github.com/"), Timeout: 20 * time.Minute})
+	}
 }
 
 // newClient uses ANTHROPIC_API_KEY (the SDK default) and falls back to CLAUDE_API_KEY.
@@ -512,6 +574,35 @@ func runServe(args []string) {
 	check(srv.Run(ctx, *addr))
 }
 
+// ghToken is the user's gh login token, or "".
+func ghToken() string {
+	b, err := exec.Command("gh", "auth", "token").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
+}
+
+// resolveFixed closes the review threads God's Eye opened for bugs that this
+// round found fixed, through the user's gh login.
+func resolveFixed(rep *render.Report) {
+	fixed := render.FixedThreads(rep)
+	if len(fixed) == 0 || rep.Meta.Repo == "" {
+		return
+	}
+	tok := ghToken()
+	if tok == "" {
+		step("Could not resolve the threads of fixed bugs: no gh login")
+		return
+	}
+	n, err := github.New(tok, "").ResolveThreads(context.Background(), rep.Meta.Repo, rep.Meta.Number, fixed)
+	if err != nil {
+		step("Could not resolve the threads of fixed bugs: %v", err)
+	} else if n > 0 {
+		step("Resolved %d review threads whose bug is fixed", n)
+	}
+}
+
 // postReview posts the summary as a GitHub PR review with one comment on each
 // verified bug's line, through the user's gh login. If GitHub refuses the line
 // comments, the summary goes up as a plain PR comment instead.
@@ -520,6 +611,7 @@ func postReview(rep *render.Report, md *bytes.Buffer) {
 	if repo == "" {
 		repo = "{owner}/{repo}" // gh fills these in from the current clone
 	}
+	resolveFixed(rep)
 	cs := render.InlineComments(rep)
 	if len(cs) > 0 {
 		req := map[string]any{"event": "COMMENT", "body": md.String(), "comments": cs}
