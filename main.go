@@ -25,6 +25,7 @@ import (
 
 	"github.com/ShivamPansuriya/gods-eye/internal/diff"
 	"github.com/ShivamPansuriya/gods-eye/internal/eval"
+	"github.com/ShivamPansuriya/gods-eye/internal/remote"
 	"github.com/ShivamPansuriya/gods-eye/internal/render"
 	"github.com/ShivamPansuriya/gods-eye/internal/review"
 	"github.com/ShivamPansuriya/gods-eye/internal/risk"
@@ -46,6 +47,7 @@ Usage:
   gods-eye eval evals/cases.json score the reviewer against known bugs
   gods-eye history               list reviews run from this folder; gods-eye open <id> reopens one
   gods-eye serve                 run the web app: connect repos, review from the UI, auto-review on PR events
+  gods-eye remote <command>      drive a running server from the terminal (gods-eye remote help)
 
 Depth (like Quick / Standard / Deep):
   auto      (default) quick for docs-only changes, deep for sensitive paths or > 600 lines, else standard
@@ -98,6 +100,11 @@ func main() {
 			return
 		case "open":
 			runOpen(os.Args[2:])
+			return
+		case "remote":
+			if err := remote.Main(os.Args[2:], os.Stdout, os.Stdin, openBrowser); err != nil {
+				fail("%v", err)
+			}
 			return
 		case "review": // `gh gods-eye review 123` reads naturally
 			os.Args = append(os.Args[:1], os.Args[2:]...)

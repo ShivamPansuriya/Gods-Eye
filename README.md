@@ -78,6 +78,25 @@ The server prints an **admin token**; sign in with it. Then, in the UI:
 
 Data lives in the data folder as plain JSON: settings (`config.json`, mode 0600), connected repos, every review and its full report, and blobless clones used for code access. The GitHub token is sent to git as a header per command and is never written into a clone's config.
 
+### Terminal client for the server
+
+Everything the web app does, from a terminal. Reviews run on the server, so they share its history, budget and keys.
+
+```bash
+gods-eye remote login https://your-server   # asks for the admin token, saves it (0600) to ~/.config/gods-eye/remote.json
+```
+```bash
+gods-eye remote prs owner/repo --merged     # open (default) or merged PRs with their last review
+```
+```bash
+gods-eye remote review owner/repo 265       # start a review and follow its log live; --fresh, --no-follow
+```
+```bash
+gods-eye remote history owner/repo          # past reviews; show <id>, watch <id>, open <id>, cancel <id>
+```
+
+Also: `status`, `repos`, `connect owner/repo`. `GODSEYE_URL` and `GODSEYE_TOKEN` override the saved login. A failed review exits non-zero, so it works in scripts.
+
 ### GitHub CLI extension (no server)
 
 ```bash
