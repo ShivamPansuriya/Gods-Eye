@@ -81,8 +81,9 @@ type Review struct {
 	Verdict    string    `json:"verdict,omitempty"`
 	Bugs       int       `json:"bugs"`
 	Minor      int       `json:"minor"`
-	Design     int       `json:"design"`         // verified problems in the existing design
-	Risk       string    `json:"risk,omitempty"` // merge risk: low | medium | high
+	Design     int       `json:"design"`               // verified problems in the existing design
+	Risk       string    `json:"risk,omitempty"`       // merge risk: low | medium | high
+	Incomplete string    `json:"incomplete,omitempty"` // what the review did not finish ("" = finished)
 	Units      int       `json:"units"`
 	CostUSD    float64   `json:"costUsd"`
 	Seconds    float64   `json:"seconds"`

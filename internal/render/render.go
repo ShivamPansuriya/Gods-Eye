@@ -71,6 +71,7 @@ var verdictText = map[string]string{
 	"approve":         "✅ Looks good",
 	"request_changes": "❌ Changes needed",
 	"needs_decision":  "🟡 Needs a decision",
+	"incomplete":      "⚠️ Not finished",
 }
 
 // Markdown writes a short PR comment: verdict, units by tier, failing checks, asks.
@@ -78,6 +79,9 @@ func Markdown(w io.Writer, rep *Report) {
 	r := rep.Review
 	fmt.Fprintf(w, "### 👁 God's Eye — %s\n\n", verdictText[r.Verdict])
 	fmt.Fprintf(w, "**%s**  \n%s\n\n", r.Title, r.ELI5)
+	if t := review.IncompleteText(r.Pipeline); t != "" {
+		fmt.Fprintf(w, "> ⚠️ **%s** The counts below are partial.\n\n", t)
+	}
 	if mr := r.MergeRisk; mr != nil {
 		writeMergeRisk(w, mr)
 	}

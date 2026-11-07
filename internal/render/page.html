@@ -138,6 +138,7 @@ h1{font-size:clamp(28px,4.2vw,42px);line-height:1.08;margin:14px 0 14px;font-wei
 .stat{border:1px solid var(--line);border-radius:10px;padding:6px 12px;font-size:13px;color:var(--muted);background:var(--bg)}
 .stat b{color:var(--ink);font-variant-numeric:tabular-nums}
 .stat.bad b{color:var(--bad)}
+.card.gaps{border-color:var(--bad);background:var(--bad-bg)}
 .mrisk{padding:0;overflow:hidden}
 .mrisk .mhead{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 16px;align-items:center;padding:16px 20px;border-bottom:1px solid var(--line)}
 .mrisk .grade{font:700 13px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;padding:9px 12px;border-radius:8px}
@@ -539,6 +540,7 @@ function renderStory(){
   h += `<h1>${esc(R.title)}</h1>`;
   h += `<p class="lead">${esc(STORY.what || R.eli5)}</p>`;
   if (ATTR && ATTR.agent) h += `<div class="attr" style="margin:-10px 0 22px"><b>${EYE} Written with an AI agent${ATTR.tool?` (${esc(ATTR.tool)})`:""}</b><span>${ATTR.reviewed==="yes"?"The author says they reviewed it.":ATTR.reviewed==="no"?"The author says they have not reviewed it yet: you are the first reviewer.":"The author has not said whether they reviewed it: treat yourself as the first reviewer."}</span></div>`;
+  h += gapsBanner();
   h += mergeRiskCard();
   h += `<div class="grid2"><div class="card"><header><span class="lbl">Why this PR exists</span>${STORY.why_basis?`<span class="tag ${STORY.why_basis}">${STORY.why_basis==="stated"?"from the PR":"inferred from code"}</span>`:""}</header><p>${esc(STORY.why || "Not stated.")}</p></div>`;
   h += `<div class="card"><header><span class="lbl">Before → after</span></header><div class="ba"><span class="lbl">Before</span><span>${esc(STORY.before||"—")}</span><span class="lbl">After</span><span class="after">${esc(STORY.after||"—")}</span></div></div></div>`;
@@ -565,6 +567,10 @@ function renderStory(){
   h += `<p class="kbd">Keys: j / k move · a looks right · c needs change · q ask author · 1-4 views · s summary</p>`;
   $("#main").innerHTML = h;
   wire();
+}
+function gapsBanner(){
+  if (!PIPE || !PIPE.incomplete) return "";
+  return `<div class="card gaps"><h3 style="color:var(--bad)">Review not finished<span>these results are partial</span></h3><ul class="plain">${(PIPE.gaps||[]).map(g=>`<li><b>${esc(g.what)}</b>${g.why?` <span style="color:var(--muted)">(${esc(g.why)})</span>`:""}</li>`).join("")}</ul>${PIPE.budget?`<p style="margin-top:8px;color:var(--muted)">Budget $${PIPE.budget.toFixed(2)}${PIPE.budgetWhy?` (${esc(PIPE.budgetWhy)})`:""}. Spent $${(PIPE.costUsd||0).toFixed(2)}. Re-run with a higher budget to finish.</p>`:""}</div>`;
 }
 const RISK = R.merge_risk || null;
 function mergeRiskCard(){
@@ -977,7 +983,7 @@ function verdictNow(){
   if (openImportant.length) return ["open", `Decide on ${openImportant.length} verified bug${openImportant.length>1?"s":""} first`];
   if (ds.includes("ask") || conf.some(f=>agree[f.id]==="y")) return ["ask","Comment"];
   if (FITEMS.some(f=>fdec[f.id]==="follow")) return ["ask","Comment"];
-  if (ds.every(Boolean) && !baseOpen()) return ["ok","Approve"];
+  if (ds.every(Boolean) && !baseOpen()) return PIPE && PIPE.incomplete ? ["ask","Comment: the review did not finish"] : ["ok","Approve"];
   return ["open","In progress"];
 }
 function composeReview(){
@@ -1026,6 +1032,7 @@ function renderSummary(){
   h += `<div class="card"><h3>Your decisions</h3><div class="path">` + units.map((u,i)=>{ const dc=decisions[u.id]||{}; return `<button class="prow" data-u="${u.id}"><span class="num ${dc.d||""}">${dc.d?NUMMARK[dc.d]:i+1}</span><span><span class="t">${esc(u.title)}</span><span class="q">${dc.d?esc(DEC[dc.d][0])+(dc.note?": "+esc(dc.note):""):"Not decided yet"}</span></span><span class="tag ${u.tier}">${u.tier==="human"?"you":u.tier}</span></button>` }).join("") + `</div></div>`;
   h += `<div class="card"><h3>Your review, ready to post<span>edit freely</span></h3><textarea class="compose" id="compose">${esc(text)}</textarea><div class="decide" style="margin-top:12px"><button class="cta" style="margin:0" id="copytext">Copy review text</button>${META.number?`<button class="cta ghost" style="margin:0" id="copygh">Copy gh command</button>`:""}</div></div>`;
   h += `<div class="card"><h3>PR description, evidence-first<span>for the author</span></h3><p style="margin:0 0 10px;color:var(--muted)">A description in the "check this, not trust me" style: who did what, the problem, the proof per change, the limits, and a plain-words ending. Hand it to the author or paste it into the PR.</p><textarea class="compose" id="prdesc">${esc(composeDescription())}</textarea><div style="margin-top:12px"><button class="cta ghost" style="margin:0" id="copydesc">Copy PR description</button></div></div>`;
+  h = h.replace('<span class="lbl">Summary</span>', '<span class="lbl">Summary</span>' + gapsBanner());
   $("#main").innerHTML = h;
   wire();
   $("#copydesc").onclick = () => copy($("#prdesc").value, "PR description copied");

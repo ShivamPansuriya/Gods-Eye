@@ -25,7 +25,7 @@ type Options struct {
 	VerifyEff string  // effort for verifiers (their prompts share only the small header, so a different effort costs little cache)
 	Depth     string  // quick | standard | deep
 	Parallel  int     // concurrent API calls
-	Budget    float64 // stop launching verifiers above this spend (USD)
+	Budget    float64 // base spend limit (USD); scaled with PR size, 45% held back for checking
 	VerifyCmd string  // optional command whose output is evidence (tests, build)
 	Prev      *State  // previous round, for incremental re-review
 	Log       func(string)
@@ -104,6 +104,10 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 		log(fmt.Sprintf("Depth %s: %s", opt.Depth, pipe.DepthWhy))
 	}
 	pipe.Depth = opt.Depth
+	opt.Budget, pipe.BudgetWhy = ScaleBudget(opt.Budget, codeLines(d, deltaFiles))
+	pipe.Budget = opt.Budget
+	preCap := huntCap(opt.Budget)
+	log(fmt.Sprintf("Budget $%.2f (%s); mapping, design and hunting may use $%.2f, the rest is kept for checking", opt.Budget, pipe.BudgetWhy, preCap))
 
 	tools := append(agent.ReadTools(),
 		agent.Tool{Name: "submit_review", Description: "Submit the structured review map. Ends the mapping task.", Schema: MapSchema(), Submit: true},
@@ -112,6 +116,8 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 		agent.Tool{Name: "submit_design", Description: "Submit the architecture, code flows, practices and foundations. Ends the architect task.", Schema: DesignSchema(), Submit: true},
 	)
 	meter := agent.NewMeter()
+	overPre := func() bool { return meter.Total().CostUSD > preCap }
+	gap := func(stage, what, why string) { pipe.Gaps = append(pipe.Gaps, Gap{Stage: stage, What: what, Why: why}) }
 	runner := &agent.Runner{
 		Client: client, Model: opt.Model, Effort: opt.Effort, System: systemPrompt,
 		Shared: sharedBlock(in, d.Summary(), callers, verifyOut), WS: ws, Tools: tools,
@@ -136,7 +142,7 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 			return
 		}
 		var r Review
-		if err := json.Unmarshal(raw, &r); err != nil {
+		if err := decodeLenient(raw, &r); err != nil {
 			mapErr = fmt.Errorf("map: %w", err)
 			return
 		}
@@ -159,18 +165,17 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 		go func() {
 			defer wg.Done()
 			raw, err := runner.Run(ctx, agent.Task{Stage: "design", Label: "design", Context: diffBlock(annotated, "whole PR"),
-				Prompt: designTaskWith(knownDesign), Submit: "submit_design", MaxTurns: 18})
+				Prompt: designTaskWith(knownDesign), Submit: "submit_design", MaxTurns: 18, Over: overPre})
+			var ds Design
+			if err == nil {
+				err = decodeLenient(raw, &ds)
+			}
 			if err != nil {
 				mu.Lock()
-				errs = append(errs, err.Error())
-				mu.Unlock()
-				return
-			}
-			var ds Design
-			if err := json.Unmarshal(raw, &ds); err != nil {
-				mu.Lock()
 				errs = append(errs, "design: "+err.Error())
+				gap("design", "design step failed: no architecture, practices, existing-design check or merge-risk claims", clampWords(err.Error(), 20))
 				mu.Unlock()
+				log("Design step failed: " + err.Error())
 				return
 			}
 			design = &ds
@@ -205,19 +210,26 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 				go func(si int, sl []string, l Lens) {
 					defer wg.Done()
 					label := fmt.Sprintf("hunt-%d-%s", si+1, l.Name)
-					raw, err := runner.Run(ctx, agent.Task{Stage: "hunt", Label: label, Context: diffBlock(d.AnnotatedFiles(huntFiles[si]), "your slice"),
-						Prompt: huntTask(l, sl, deltaText, known), Submit: "submit_findings", MaxTurns: 14})
-					mu.Lock()
-					defer mu.Unlock()
-					if err != nil {
-						errs = append(errs, err.Error())
+					files := fmt.Sprintf("%d file(s)", len(huntFiles[si]))
+					if overPre() {
+						mu.Lock()
+						gap("hunt", fmt.Sprintf("slice %d (%s, %s lens) not searched for bugs", si+1, files, l.Name), "hunting share of the budget spent")
+						mu.Unlock()
 						return
 					}
+					raw, err := runner.Run(ctx, agent.Task{Stage: "hunt", Label: label, Context: diffBlock(d.AnnotatedFiles(huntFiles[si]), "your slice"),
+						Prompt: huntTask(l, sl, deltaText, known), Submit: "submit_findings", MaxTurns: 14, Over: overPre})
 					var out struct {
 						Findings []Finding `json:"findings"`
 					}
-					if err := json.Unmarshal(raw, &out); err != nil {
+					if err == nil {
+						err = json.Unmarshal(raw, &out)
+					}
+					mu.Lock()
+					defer mu.Unlock()
+					if err != nil {
 						errs = append(errs, label+": "+err.Error())
+						gap("hunt", fmt.Sprintf("slice %d (%s, %s lens) not searched: the hunter failed", si+1, files, l.Name), clampWords(err.Error(), 20))
 						return
 					}
 					for _, f := range out.Findings {
@@ -296,7 +308,7 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 	}
 
 	// 8. Independent verification by vote.
-	voters := 0
+	voters, voteFails := 0, 0
 	if opt.Depth != "quick" {
 		voters = len(VerifyLenses)
 	}
@@ -324,11 +336,13 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 					defer mu.Unlock()
 					if err != nil {
 						errs = append(errs, err.Error())
+						voteFails++
 						return
 					}
 					var v Vote
 					if err := json.Unmarshal(raw, &v); err != nil {
 						errs = append(errs, err.Error())
+						voteFails++
 						return
 					}
 					v.Lens = l.Name
@@ -357,6 +371,7 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 						defer mu.Unlock()
 						if err != nil {
 							errs = append(errs, err.Error())
+							voteFails++
 							return
 						}
 						var v Vote
@@ -384,6 +399,7 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 					defer mu.Unlock()
 					if err != nil {
 						errs = append(errs, err.Error())
+						voteFails++
 						return
 					}
 					var v Vote
@@ -395,6 +411,9 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 			}
 		}
 		vwg.Wait()
+		if voteFails > 0 {
+			gap("verify", fmt.Sprintf("%d verifier call(s) failed", voteFails), "those claims were judged on fewer votes, and a missing vote counts against them")
+		}
 	}
 	for _, c := range riskClaims {
 		TallyClaim(c, voters)
@@ -453,6 +472,10 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 	}
 	pipe.CostUSD = meter.Total().CostUSD
 	r.Pipeline = pipe
+	Finish(r)
+	if t := IncompleteText(pipe); t != "" {
+		log(t)
+	}
 	log("Cost by stage:\n" + strings.TrimRight(meter.String(), "\n"))
 	return r, nil
 }

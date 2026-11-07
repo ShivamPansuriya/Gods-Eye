@@ -222,16 +222,17 @@ func BuildMergeRisk(r *Review, d *diff.Diff, rules []risk.Rule, verifyExit int, 
 			al.Level = min(2, n)
 		}
 		al.Reason, al.Claims = ri.Alignment.Reason, ri.Alignment.DriveBy
-	} else {
-		al.Level = 0
 	}
 	if notDone > 0 {
 		al.Level = max(al.Level, min(2, notDone))
 		al.Reason = strings.TrimSpace(fmt.Sprintf("%d stated requirement%s not met. %s", notDone, plural(notDone), al.Reason))
 	}
-	al.Grade = []string{"aligned", "some drift", "drifted"}[al.Level]
-	if al.Reason == "" {
-		al.Reason = "Matches the PR's stated purpose."
+	// Without the architect nobody looked for drive-by edits: say so, never "aligned".
+	if al.Level >= 0 {
+		al.Grade = []string{"aligned", "some drift", "drifted"}[al.Level]
+		if al.Reason == "" {
+			al.Reason = "Matches the PR's stated purpose."
+		}
 	}
 	sigs = append(sigs, al)
 
@@ -452,13 +453,12 @@ func capFirst(s string) string {
 // quick; sensitive paths or a large change → deep; otherwise standard.
 // In a re-review round only the files changed since the last round count.
 func AutoDepth(d *diff.Diff, rules []risk.Rule, only map[string]bool) (string, string) {
-	lines := 0
+	lines := codeLines(d, only)
 	var paths []string
 	for _, f := range d.Files {
 		if skipHunt(f.Path) || f.Status == "binary" || (only != nil && !only[f.Path]) {
 			continue
 		}
-		lines += f.Adds + f.Dels
 		paths = append(paths, f.Path)
 	}
 	if len(paths) == 0 {
@@ -471,4 +471,17 @@ func AutoDepth(d *diff.Diff, rules []risk.Rule, only map[string]bool) (string, s
 		return "deep", fmt.Sprintf("%d changed lines of code", lines)
 	}
 	return "standard", fmt.Sprintf("%d changed lines of code, no sensitive paths", lines)
+}
+
+// codeLines counts changed lines in reviewable code (no docs, lockfiles or
+// binaries); with only set, just those files (a re-review round).
+func codeLines(d *diff.Diff, only map[string]bool) int {
+	n := 0
+	for _, f := range d.Files {
+		if skipHunt(f.Path) || f.Status == "binary" || (only != nil && !only[f.Path]) {
+			continue
+		}
+		n += f.Adds + f.Dels
+	}
+	return n
 }

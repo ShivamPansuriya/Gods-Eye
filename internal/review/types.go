@@ -193,6 +193,10 @@ type Pipeline struct {
 	Notice       string                `json:"notice,omitempty"`
 	DesignStats  *DesignStats          `json:"designStats,omitempty"`
 	RiskClaims   int                   `json:"riskClaims,omitempty"` // merge-risk claims sent to the voters
+	Budget       float64               `json:"budget,omitempty"`     // spend limit used for this review (USD)
+	BudgetWhy    string                `json:"budgetWhy,omitempty"`  // how it was sized
+	Gaps         []Gap                 `json:"gaps,omitempty"`       // work not finished, shown in the verdict
+	Incomplete   bool                  `json:"incomplete,omitempty"`
 	Errors       []string              `json:"errors,omitempty"`
 }
 

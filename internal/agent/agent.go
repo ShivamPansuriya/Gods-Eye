@@ -87,6 +87,9 @@ type Task struct {
 	MaxTurns int
 	Effort   string        // overrides Runner.Effort for this task
 	Started  chan struct{} // closed when the first response starts streaming (cache is written)
+	// Over reports that this task's share of the budget is spent; the agent is
+	// then told to submit what it has instead of exploring further.
+	Over func() bool
 }
 
 // ErrNoSubmit is returned when the agent never called its submit tool.
@@ -106,6 +109,7 @@ func (r *Runner) Run(ctx context.Context, t Task) (json.RawMessage, error) {
 	blocks = append(blocks, anthropic.NewBetaTextBlock(t.Prompt))
 	msgs := []anthropic.BetaMessageParam{anthropic.NewBetaUserMessage(blocks...)}
 	nudges := 0
+	overAt := -1
 	signalled := false
 	signal := func() {
 		if !signalled && t.Started != nil {
@@ -152,11 +156,15 @@ func (r *Runner) Run(ctx context.Context, t Task) (json.RawMessage, error) {
 				fmt.Sprintf("Call the %s tool now with your result. Do not answer in plain text.", t.Submit))))
 			continue
 		}
-		if turn >= t.MaxTurns-1 {
+		if overAt < 0 && t.Over != nil && t.Over() {
+			overAt = turn
+			r.log(fmt.Sprintf("%s: budget share spent, asking it to submit", t.Label))
+		}
+		if turn >= t.MaxTurns-1 || overAt >= 0 {
 			results = append(results, anthropic.NewBetaTextBlock(
 				fmt.Sprintf("You have used your exploration budget. Call %s now with what you have; do not call other tools.", t.Submit)))
 		}
-		if turn >= t.MaxTurns+2 {
+		if turn >= t.MaxTurns+2 || (overAt >= 0 && turn >= overAt+3) {
 			return nil, fmt.Errorf("%s: %w (turn limit)", t.Label, ErrNoSubmit)
 		}
 		msgs = append(msgs, anthropic.NewBetaUserMessage(results...))

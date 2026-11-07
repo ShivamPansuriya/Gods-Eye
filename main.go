@@ -68,7 +68,7 @@ func main() {
 		depth    = flag.String("depth", "auto", "auto | quick | standard | deep")
 		vEffort  = flag.String("verify-effort", "medium", "reasoning effort for the verifiers")
 		parallel = flag.Int("parallel", 8, "max concurrent API calls")
-		budget   = flag.Float64("budget", 15, "stop starting new verifications above this spend, in USD")
+		budget   = flag.Float64("budget", 15, "base budget in USD for a PR up to 1,500 changed lines of code; grows with size up to 4x, 45% kept for checking findings")
 		verify   = flag.String("verify-cmd", "", "run this command in the checkout (tests, build) and use its output as evidence")
 		fresh    = flag.Bool("fresh", false, "ignore the previous round; review the whole PR again")
 		wsDir    = flag.String("workspace", "", "repository checkout for code access (default: current repo)")
@@ -166,6 +166,9 @@ func main() {
 				time.Since(t0).Round(time.Second), len(r.Units), p.Confirmed, p.PreExisting, p.Rejected, p.Unverifiable, p.CostUSD)
 			for _, e := range p.Errors {
 				step("warning: %s", e)
+			}
+			if t := review.IncompleteText(p); t != "" {
+				step("⚠ %s", t)
 			}
 			if in.HeadSHA != "" {
 				if err := review.SaveState(".godseye", key, in.HeadSHA, r); err != nil {
@@ -410,6 +413,7 @@ func saveCLIReview(in *source.Input, rep *render.Report) {
 	if r.MergeRisk != nil {
 		rec.Risk = r.MergeRisk.Overall
 	}
+	rec.Incomplete = review.IncompleteText(r.Pipeline)
 	if r.Design != nil {
 		for _, f := range r.Design.Foundations.Items {
 			if f.Status == "confirmed" {

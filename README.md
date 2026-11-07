@@ -43,7 +43,7 @@ gh / git ──► diff (H1..Hn) ──► caller index (git grep for every chan
 ```
 
 - **Depth:** `--depth auto` (default) picks for you: `quick` when there is no code to hunt in (docs, lockfiles), `deep` for sensitive paths or more than 600 changed lines, `standard` otherwise. Or set it: `quick` (mapper only), `standard` (hunters + 3 voters), `deep` (two hunter lenses per slice: logic and contracts).
-- **Cost control:** every agent shares one cached prefix (tools, system prompt, PR header), so most input tokens are cheap cache reads. Each hunter sees only its slice of the diff, verifiers only the hunk in question. `--budget` stops new verifications above a spend limit.
+- **Cost control:** every agent shares one cached prefix (tools, system prompt, PR header), so most input tokens are cheap cache reads. Each hunter sees only its slice of the diff, verifiers only the hunk in question. `--budget` is the base budget for a PR up to 1,500 changed lines of code; it grows in proportion with size, up to 4×. 45% of it is held back so the findings can be checked: hunters that reach their share are told to submit what they have.
 - **Re-review rounds:** the state of each review is saved in `.godseye/state/`. On the next run, hunters look only at what changed since the last reviewed commit and are told what was already reported. Earlier bugs whose code is gone are marked **Fixed**. From round 3, the page suggests rethinking the approach instead of patching line by line. Use `--fresh` to start over.
 - **Empirical evidence:** `--verify-cmd "go test ./..."` runs the command in the checkout and feeds its output to every agent.
 

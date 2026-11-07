@@ -71,7 +71,7 @@ func TestBuildMergeRiskScoresFiveSignals(t *testing.T) {
 	// No architect (quick depth): rollback and errors are not assessed and do not count.
 	q := BuildMergeRisk(&Review{}, d, nil, 1, "go test ./...")
 	for _, s := range q.Signals {
-		if (s.Key == "rollback" || s.Key == "errors") && s.Level != -1 {
+		if (s.Key == "rollback" || s.Key == "errors" || s.Key == "alignment") && s.Level != -1 {
 			t.Fatalf("quick %s = %d", s.Key, s.Level)
 		}
 		if s.Key == "verification" && s.Level != 2 {

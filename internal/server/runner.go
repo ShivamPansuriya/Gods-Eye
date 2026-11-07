@@ -285,12 +285,16 @@ func (r *Runner) run(ctx context.Context, rec *store.Review) error {
 	if rv.MergeRisk != nil {
 		rec.Risk = rv.MergeRisk.Overall
 	}
+	rec.Incomplete = review.IncompleteText(p)
 	if rv.Design != nil {
 		for _, f := range rv.Design.Foundations.Items {
 			if f.Status == "confirmed" {
 				rec.Design++
 			}
 		}
+	}
+	if rec.Incomplete != "" {
+		r.logf(rec.ID, "%s", rec.Incomplete)
 	}
 	r.logf(rec.ID, "Done: %d bugs, %d minor, %d design problems · %s merge risk · $%.2f", rec.Bugs, rec.Minor, rec.Design, rec.Risk, rec.CostUSD)
 
