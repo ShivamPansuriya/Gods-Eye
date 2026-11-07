@@ -31,19 +31,28 @@ type Options struct {
 	Log       func(string)
 }
 
-// MaxDiffChars guards against sending something huge by accident (~250k tokens).
-const MaxDiffChars = 1_000_000
+// No agent reads more than a bounded view of the diff, so a PR of any size is
+// reviewed: the mapper and architect get an Overview of at most WholeViewChars
+// (every file and hunk listed, bodies by priority), and hunters get slices of
+// about SliceChars each, as many slices as the size needs (up to MaxSlices).
+const (
+	WholeViewChars = 400_000
+	SliceChars     = 120_000
+	MaxSlices      = 40
+)
 
 // Run reviews a PR end to end.
 func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff.Diff, ws *workspace.Workspace, rules []risk.Rule, opt Options) (*Review, error) {
 	t0 := time.Now()
 	opt.defaults()
 	log := opt.Log
-	annotated := d.Annotated()
-	if len(annotated) > MaxDiffChars {
-		return nil, fmt.Errorf("diff is %d chars (limit %d); split the PR or review a narrower range", len(annotated), MaxDiffChars)
-	}
 	pipe := &Pipeline{Depth: opt.Depth, Round: 1, Workspace: ws != nil}
+	fullChars := len(d.Annotated())
+	annotated, summarized := d.Overview(WholeViewChars)
+	if summarized > 0 {
+		pipe.Summarized = append(pipe.Summarized, fmt.Sprintf("The diff is %d characters, so the mapper and architect saw %d of %d files as a summary (every hunk listed, body read on demand with read_file). Every file is still searched by a bug hunter.", fullChars, summarized, len(d.Files)))
+		log(pipe.Summarized[0])
+	}
 
 	// 1. Deterministic context: who uses the symbols this PR touches.
 	callers := ""
@@ -201,7 +210,8 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 		}
 	}
 	if opt.Depth != "quick" {
-		huntSlcs, huntFiles = slices(d, deltaFiles, 10)
+		nSlices := min(MaxSlices, max(10, (fullChars+SliceChars-1)/SliceChars))
+		huntSlcs, huntFiles = slices(d, deltaFiles, nSlices)
 		pipe.Hunters = len(huntSlcs) * len(lenses)
 		log(fmt.Sprintf("Hunting with %d agents (%d slices × %d lens)", pipe.Hunters, len(huntSlcs), len(lenses)))
 		for si, sl := range huntSlcs {
@@ -217,7 +227,13 @@ func Run(ctx context.Context, client anthropic.Client, in *source.Input, d *diff
 						mu.Unlock()
 						return
 					}
-					raw, err := runner.Run(ctx, agent.Task{Stage: "hunt", Label: label, Context: diffBlock(d.AnnotatedFiles(huntFiles[si]), "your slice"),
+					view, partial := d.Only(huntFiles[si]).Overview(SliceChars)
+					if partial > 0 {
+						mu.Lock()
+						pipe.Summarized = append(pipe.Summarized, fmt.Sprintf("Hunter slice %d (%s lens) saw %d large file(s) as a summary and read them on demand.", si+1, l.Name, partial))
+						mu.Unlock()
+					}
+					raw, err := runner.Run(ctx, agent.Task{Stage: "hunt", Label: label, Context: diffBlock(view, "your slice"),
 						Prompt: huntTask(l, sl, deltaText, known), Submit: "submit_findings", MaxTurns: 14, Over: overPre})
 					var out struct {
 						Findings []Finding `json:"findings"`

@@ -569,8 +569,9 @@ function renderStory(){
   wire();
 }
 function gapsBanner(){
-  if (!PIPE || !PIPE.incomplete) return "";
-  return `<div class="card gaps"><h3 style="color:var(--bad)">Review not finished<span>these results are partial</span></h3><ul class="plain">${(PIPE.gaps||[]).map(g=>`<li><b>${esc(g.what)}</b>${g.why?` <span style="color:var(--muted)">(${esc(g.why)})</span>`:""}</li>`).join("")}</ul>${PIPE.budget?`<p style="margin-top:8px;color:var(--muted)">Budget $${PIPE.budget.toFixed(2)}${PIPE.budgetWhy?` (${esc(PIPE.budgetWhy)})`:""}. Spent $${(PIPE.costUsd||0).toFixed(2)}. Re-run with a higher budget to finish.</p>`:""}</div>`;
+  const sum = PIPE && (PIPE.summarized||[]).length ? `<div class="notice"><b>Large PR:</b> ${esc(PIPE.summarized[0])}${PIPE.summarized.length>1?` ${PIPE.summarized.length-1} hunter slice(s) also read large files on demand.`:""}</div>` : "";
+  if (!PIPE || !PIPE.incomplete) return sum;
+  return `<div class="card gaps"><h3 style="color:var(--bad)">Review not finished<span>these results are partial</span></h3><ul class="plain">${(PIPE.gaps||[]).map(g=>`<li><b>${esc(g.what)}</b>${g.why?` <span style="color:var(--muted)">(${esc(g.why)})</span>`:""}</li>`).join("")}</ul>${PIPE.budget?`<p style="margin-top:8px;color:var(--muted)">Budget $${PIPE.budget.toFixed(2)}${PIPE.budgetWhy?` (${esc(PIPE.budgetWhy)})`:""}. Spent $${(PIPE.costUsd||0).toFixed(2)}. Re-run with a higher budget to finish.</p>`:""}</div>` + sum;
 }
 const RISK = R.merge_risk || null;
 function mergeRiskCard(){

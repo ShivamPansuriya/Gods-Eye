@@ -82,6 +82,9 @@ func Markdown(w io.Writer, rep *Report) {
 	if t := review.IncompleteText(r.Pipeline); t != "" {
 		fmt.Fprintf(w, "> ⚠️ **%s** The counts below are partial.\n\n", t)
 	}
+	if p := r.Pipeline; p != nil && len(p.Summarized) > 0 {
+		fmt.Fprintf(w, "<sub>ℹ️ %s</sub>\n\n", p.Summarized[0])
+	}
 	if mr := r.MergeRisk; mr != nil {
 		writeMergeRisk(w, mr)
 	}

@@ -196,6 +196,7 @@ type Pipeline struct {
 	Budget       float64               `json:"budget,omitempty"`     // spend limit used for this review (USD)
 	BudgetWhy    string                `json:"budgetWhy,omitempty"`  // how it was sized
 	Gaps         []Gap                 `json:"gaps,omitempty"`       // work not finished, shown in the verdict
+	Summarized   []string              `json:"summarized,omitempty"` // where agents saw a summary instead of the full diff
 	Incomplete   bool                  `json:"incomplete,omitempty"`
 	Errors       []string              `json:"errors,omitempty"`
 }

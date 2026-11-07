@@ -69,7 +69,7 @@ func sharedBlock(in *source.Input, fileSummary, callers, verifyOut string) strin
 
 // diffBlock wraps (part of) the annotated diff.
 func diffBlock(annotated, scope string) string {
-	return "<annotated_diff scope=\"" + scope + "\">\nEach hunk is labelled H1, H2, …; each line shows its new-file line number (deleted lines show o<old number>). Read the full files with read_file for context.\n" + annotated + "</annotated_diff>"
+	return "<annotated_diff scope=\"" + scope + "\">\nEach hunk is labelled H1, H2, …; each line shows its new-file line number (deleted lines show o<old number>). Read the full files with read_file for context. A file marked [summarized] lists only its hunks: read it with read_file before you judge it; one marked [changed lines only] has no context lines.\n" + annotated + "</annotated_diff>"
 }
 
 // mapTask: split into units, tiers, flows, notes, done-when checks.

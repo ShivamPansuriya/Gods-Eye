@@ -168,22 +168,30 @@ func (d *Diff) HunkByID() map[string]*Hunk {
 func (d *Diff) Annotated() string {
 	var b strings.Builder
 	for _, f := range d.Files {
-		fmt.Fprintf(&b, "=== FILE %s (%s, +%d -%d)\n", f.Path, f.Status, f.Adds, f.Dels)
-		for _, h := range f.Hunks {
-			fmt.Fprintf(&b, "--- HUNK %s @@ -%d,%d +%d,%d @@ %s\n", h.ID, h.OldStart, h.OldLines, h.NewStart, h.NewLines, h.Header)
-			for _, l := range h.Lines {
-				switch l.Kind {
-				case Add:
-					fmt.Fprintf(&b, "%5d + %s\n", l.New, l.Text)
-				case Del:
-					fmt.Fprintf(&b, "%5s - %s\n", fmt.Sprintf("o%d", l.Old), l.Text)
-				default:
-					fmt.Fprintf(&b, "%5d   %s\n", l.New, l.Text)
-				}
-			}
-		}
+		writeFile(&b, f)
 	}
 	return b.String()
+}
+
+func writeFile(b *strings.Builder, f *File) {
+	fmt.Fprintf(b, "=== FILE %s (%s, +%d -%d)\n", f.Path, f.Status, f.Adds, f.Dels)
+	for _, h := range f.Hunks {
+		fmt.Fprintf(b, "--- HUNK %s @@ -%d,%d +%d,%d @@ %s\n", h.ID, h.OldStart, h.OldLines, h.NewStart, h.NewLines, h.Header)
+		for _, l := range h.Lines {
+			writeLine(b, l)
+		}
+	}
+}
+
+func writeLine(b *strings.Builder, l Line) {
+	switch l.Kind {
+	case Add:
+		fmt.Fprintf(b, "%5d + %s\n", l.New, l.Text)
+	case Del:
+		fmt.Fprintf(b, "%5s - %s\n", fmt.Sprintf("o%d", l.Old), l.Text)
+	default:
+		fmt.Fprintf(b, "%5d   %s\n", l.New, l.Text)
+	}
 }
 
 func splitGitPaths(s string) (string, string, bool) {
