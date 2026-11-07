@@ -171,7 +171,7 @@ func (s *Store) Repos() ([]Repo, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	files, _ := filepath.Glob(filepath.Join(s.Dir, "repos", "*.json"))
-	var rs []Repo
+	rs := []Repo{}
 	for _, f := range files {
 		var r Repo
 		if read(f, &r) == nil {
@@ -239,7 +239,7 @@ func (s *Store) Reviews(repo string, pr int, limit int) ([]Review, error) {
 	defer s.mu.Unlock()
 	files, _ := filepath.Glob(filepath.Join(s.Dir, "reviews", "*.json"))
 	sort.Sort(sort.Reverse(sort.StringSlice(files)))
-	var out []Review
+	out := []Review{}
 	for _, f := range files {
 		if strings.HasSuffix(f, ".report.json") {
 			continue

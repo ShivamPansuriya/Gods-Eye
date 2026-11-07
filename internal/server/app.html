@@ -222,23 +222,24 @@ async function viewRepo(owner, name, tab){
   if (!rp) { $("#main").innerHTML = `<div class="notice err">${esc(full)} is not connected. <a href="#/connect">Connect it</a>.</div>`; return; }
   tab = tab || "pulls";
   let h = `<div class="row" style="justify-content:space-between"><div><span class="lbl">Repository</span><h1>${esc(full)}</h1></div><div class="row">${rp.settings.autoReview?`<span class="chip ok">Auto review on</span>`:`<span class="chip">Auto review off</span>`}<a class="btn sm" href="${esc(rp.htmlUrl)}" target="_blank" rel="noopener">GitHub ↗</a></div></div>`;
-  h += `<nav class="tabs">${[["pulls","Open pull requests"],["history","Review history"],["settings","Settings"]].map(([k,l])=>`<a href="#/repo/${esc(full)}/${k}" class="${tab===k?"on":""}">${l}</a>`).join("")}</nav><div id="tab"></div>`;
+  h += `<nav class="tabs">${[["pulls","Open pull requests"],["merged","Merged"],["history","Review history"],["settings","Settings"]].map(([k,l])=>`<a href="#/repo/${esc(full)}/${k}" class="${tab===k?"on":""}">${l}</a>`).join("")}</nav><div id="tab"></div>`;
   $("#main").innerHTML = h;
-  if (tab === "pulls") return repoPulls(full);
-  if (tab === "history") { const rs = await api("/api/reviews?repo=" + encodeURIComponent(full) + "&limit=200"); $("#tab").innerHTML = `<div class="card">${reviewTable(rs, false)}</div>`; return; }
+  if (tab === "pulls") return repoPulls(full, "open");
+  if (tab === "merged") return repoPulls(full, "merged");
+  if (tab === "history") { const rs = await api("/api/reviews?repo=" + encodeURIComponent(full) + "&limit=200"); $("#tab").innerHTML = `<div class="card">${rs.length ? reviewTable(rs, false) : `<p class="empty">No reviews yet. Start one from Open pull requests or Merged.</p>`}</div>`; return; }
   return repoSettings(rp);
 }
-async function repoPulls(full){
+async function repoPulls(full, state){
   $("#tab").innerHTML = `<div class="card"><p class="muted">Loading pull requests…</p></div>`;
   let ps;
-  try { ps = await api(`/api/repos/${full}/pulls`); } catch(err) { $("#tab").innerHTML = `<div class="notice err">${esc(err.message)}</div>`; return; }
+  try { ps = await api(`/api/repos/${full}/pulls?state=${state}`); } catch(err) { $("#tab").innerHTML = `<div class="notice err">${esc(err.message)}</div>`; return; }
   const busy = ps.some(p=>p.last && (p.last.status==="queued"||p.last.status==="running"));
   $("#tab").innerHTML = `<div class="card">${ps.length ? ps.map(p => {
     const l = p.last, running = l && (l.status==="queued"||l.status==="running");
     const act = running ? `<a class="btn sm" href="#/review/${l.id}"><span class="spin"></span> Progress</a>` : l && l.status==="done" ? `${p.stale?`<button class="btn sm pri" data-rv="${p.number}">Review new commits</button>`:`<button class="btn sm" data-rv="${p.number}">Review again</button>`}<a class="btn sm" href="/r/${l.id}" target="_blank" rel="noopener">Open review</a>` : `<button class="btn sm pri" data-rv="${p.number}">Review now</button>`;
-    return `<div class="pr"><div><a class="title" href="#/pr/${esc(full)}/${p.number}">#${p.number} ${esc(p.title)}</a><div class="m">${p.draft?`<span class="chip">Draft</span>`:""}<span>${esc(p.user.login)}</span><span>${esc(p.head.ref)} → ${esc(p.base.ref)}</span><span>updated ${ago(p.updated_at)}</span>${statusChip(l)}${p.rounds?`<span>${p.rounds} round${p.rounds>1?"s":""}</span>`:""}${p.stale?`<span class="chip warn">New commits</span>`:""}${counts(l)}</div></div><div class="row">${act}</div></div>`; }).join("") : `<p class="empty">No open pull requests.</p>`}</div>`;
+    return `<div class="pr"><div><a class="title" href="#/pr/${esc(full)}/${p.number}">#${p.number} ${esc(p.title)}</a><div class="m">${p.draft?`<span class="chip">Draft</span>`:""}<span>${esc(p.user.login)}</span><span>${esc(p.head.ref)} → ${esc(p.base.ref)}</span>${p.merged_at?`<span class="chip ok">Merged ${ago(p.merged_at)}</span>`:`<span>updated ${ago(p.updated_at)}</span>`}${statusChip(l)}${p.rounds?`<span>${p.rounds} round${p.rounds>1?"s":""}</span>`:""}${p.stale?`<span class="chip warn">New commits</span>`:""}${counts(l)}</div></div><div class="row">${act}</div></div>`; }).join("") : `<p class="empty">${state==="merged"?"No merged pull requests in the last 50 closed.":"No open pull requests."}</p>`}</div>`;
   document.querySelectorAll("[data-rv]").forEach(b => b.onclick = async () => { b.disabled = true; try { const r = await api(`/api/repos/${full}/pulls/${b.dataset.rv}/review`, {method:"POST", body:{}}); toast("Review queued"); location.hash = "#/review/" + r.id; } catch(err){ toast(err.message); b.disabled = false; } });
-  if (busy) { stopPoll(); poll = setInterval(()=>{ if (location.hash.startsWith("#/repo/"+full)) repoPulls(full).catch(()=>{}); }, 5000); }
+  if (busy) { stopPoll(); poll = setInterval(()=>{ if (location.hash.startsWith("#/repo/"+full)) repoPulls(full, state).catch(()=>{}); }, 5000); }
 }
 async function repoSettings(rp){
   const s = rp.settings, st = await api("/api/status");

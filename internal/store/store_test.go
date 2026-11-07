@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -48,5 +49,20 @@ func TestStoreRoundTrip(t *testing.T) {
 	}
 	if _, ok := s.Review("../../etc/passwd"); ok {
 		t.Fatal("path traversal in id")
+	}
+}
+
+func TestEmptyListsEncodeAsArrays(t *testing.T) {
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rs, _ := s.Reviews("x/y", 0, 10)
+	repos, _ := s.Repos()
+	for name, v := range map[string]any{"reviews": rs, "repos": repos} {
+		b, _ := json.Marshal(v)
+		if string(b) != "[]" {
+			t.Errorf("%s = %s, want []", name, b)
+		}
 	}
 }

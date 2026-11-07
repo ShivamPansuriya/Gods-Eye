@@ -143,13 +143,14 @@ func (c *Client) Repo(ctx context.Context, fullName string) (Repo, error) {
 
 // Pull is a pull request.
 type Pull struct {
-	Number    int       `json:"number"`
-	Title     string    `json:"title"`
-	Body      string    `json:"body"`
-	State     string    `json:"state"`
-	Draft     bool      `json:"draft"`
-	HTMLURL   string    `json:"html_url"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Number    int        `json:"number"`
+	Title     string     `json:"title"`
+	Body      string     `json:"body"`
+	State     string     `json:"state"`
+	Draft     bool       `json:"draft"`
+	HTMLURL   string     `json:"html_url"`
+	UpdatedAt time.Time  `json:"updated_at"`
+	MergedAt  *time.Time `json:"merged_at"`
 	User      struct {
 		Login string `json:"login"`
 	} `json:"user"`
@@ -166,11 +167,35 @@ type Pull struct {
 	ChangedFiles int `json:"changed_files"`
 }
 
-// Pulls lists open pull requests.
-func (c *Client) Pulls(ctx context.Context, fullName string) ([]Pull, error) {
-	var ps []Pull
-	err := c.do(ctx, "GET", "/repos/"+fullName+"/pulls?state=open&per_page=50&sort=updated&direction=desc", nil, "", &ps)
-	return ps, err
+// Pulls lists pull requests: state "open", or "merged" (closed and merged,
+// newest first). Closed-but-unmerged pull requests are left out.
+func (c *Client) Pulls(ctx context.Context, fullName, state string) ([]Pull, error) {
+	ghState := "open"
+	if state == "merged" {
+		ghState = "closed"
+	}
+	ps := []Pull{}
+	err := c.do(ctx, "GET", "/repos/"+fullName+"/pulls?state="+ghState+"&per_page=50&sort=updated&direction=desc", nil, "", &ps)
+	if err != nil || state != "merged" {
+		return ps, err
+	}
+	merged := []Pull{}
+	for _, p := range ps {
+		if p.MergedAt != nil {
+			merged = append(merged, p)
+		}
+	}
+	return merged, nil
+}
+
+// DiffBase is what the PR's diff starts from. An open PR is compared with its
+// base branch. Once merged, the base branch contains the PR, so the diff starts
+// from the base commit GitHub recorded for the PR instead.
+func (p Pull) DiffBase() string {
+	if p.MergedAt != nil && p.Base.SHA != "" {
+		return p.Base.SHA
+	}
+	return "refs/remotes/origin/" + p.Base.Ref
 }
 
 // Pull returns one pull request.

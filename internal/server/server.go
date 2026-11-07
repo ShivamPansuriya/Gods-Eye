@@ -453,7 +453,7 @@ func (s *Server) pulls(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 404, map[string]string{"error": "Not connected."})
 		return
 	}
-	ps, err := s.gh().Pulls(r.Context(), name)
+	ps, err := s.gh().Pulls(r.Context(), name, r.URL.Query().Get("state"))
 	if err != nil {
 		writeJSON(w, 502, map[string]string{"error": "GitHub: " + err.Error()})
 		return

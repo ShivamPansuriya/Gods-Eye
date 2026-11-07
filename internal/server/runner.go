@@ -209,7 +209,7 @@ func (r *Runner) run(ctx context.Context, rec *store.Review) error {
 	if err != nil {
 		return err
 	}
-	mb, err := git(ctx, dir, "merge-base", "refs/remotes/origin/"+pull.Base.Ref, pull.Head.SHA)
+	mb, err := git(ctx, dir, "merge-base", pull.DiffBase(), pull.Head.SHA)
 	if err != nil {
 		return fmt.Errorf("find merge base: %w", err)
 	}
